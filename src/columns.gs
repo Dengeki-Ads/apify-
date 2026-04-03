@@ -61,7 +61,8 @@ const filterColumns = () => {
  * hashtags 列から指定キーワードに一致する値を REGEXEXTRACT で抽出。
  */
 const addExtractColumn = (propertyKey, headerName) => {
-  const keyword = PropertiesService.getScriptProperties().getProperty(propertyKey);
+  const props = PropertiesService.getScriptProperties();
+  const keyword = props.getProperty(propertyKey);
   if (!keyword) {
     Logger.log(`[EXTRACT SKIP] ${propertyKey} is not set.`);
     return;
@@ -90,14 +91,22 @@ const addExtractColumn = (propertyKey, headerName) => {
     sheet.getRange(1, formulaColIndex + 1).setValue(headerName);
   }
 
-  const escapedKeyword = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // REGEXREPLACE ルールを取得（例: "belmise:ベルミス"）
+  const replaceRule = props.getProperty(`${propertyKey}_Replace`);
+
+  // 数式を組み立て: LOWER + TRIM → (REGEXREPLACE) → REGEXEXTRACT
   const formulas = [];
   for (let row = 2; row <= lastRow; row++) {
-    formulas.push([`=IFERROR(REGEXEXTRACT(${hashtagColLetter}${row},"${escapedKeyword}"),"")`]);
+    let innerExpr = `LOWER(TRIM(${hashtagColLetter}${row}))`;
+    if (replaceRule) {
+      const [from, to] = replaceRule.split(':');
+      innerExpr = `REGEXREPLACE(${innerExpr},"${from}","${to}")`;
+    }
+    formulas.push([`=IFERROR(REGEXEXTRACT(${innerExpr},"${keyword}"),"")`]);
   }
 
   sheet.getRange(2, formulaColIndex + 1, formulas.length, 1).setFormulas(formulas);
-  Logger.log(`[EXTRACT OK] Added "${headerName}" column with keyword "${keyword}".`);
+  Logger.log(`[EXTRACT OK] Added "${headerName}" column with keyword "${keyword}"${replaceRule ? `, replace: ${replaceRule}` : ''}.`);
 };
 
 /**
