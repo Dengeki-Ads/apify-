@@ -70,6 +70,7 @@ function doPost(e) {
     });
 
     appendDataRows(headers, rows);
+    filterColumns();
 
     updateLogRow(runId, {
       completed_at: new Date(),

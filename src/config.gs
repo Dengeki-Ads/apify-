@@ -41,3 +41,13 @@ const buildDatasetUrl = (datasetId) => {
   const apiKey = getConfig('APIFY_API_KEY');
   return `https://api.apify.com/v2/datasets/${datasetId}/items?token=${apiKey}`;
 };
+
+/**
+ * COLUMNS_TO_KEEP をパースし、常に保持する列を付与して返す。
+ */
+const getColumnsToKeep = () => {
+  const raw = getConfig('COLUMNS_TO_KEEP');
+  const userColumns = raw.split(',').map((s) => s.trim()).filter((s) => s);
+  const alwaysKeep = ['fetched_at', 'run_id'];
+  return [...new Set([...alwaysKeep, ...userColumns])];
+};
