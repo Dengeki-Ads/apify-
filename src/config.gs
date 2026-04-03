@@ -47,7 +47,5 @@ const buildDatasetUrl = (datasetId) => {
  */
 const getColumnsToKeep = () => {
   const raw = getConfig('COLUMNS_TO_KEEP');
-  const userColumns = raw.split(',').map((s) => s.trim()).filter((s) => s);
-  const alwaysKeep = ['fetched_at', 'run_id'];
-  return [...new Set([...alwaysKeep, ...userColumns])];
+  return raw.split(',').map((s) => s.trim()).filter((s) => s);
 };

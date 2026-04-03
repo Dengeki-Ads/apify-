@@ -71,6 +71,7 @@ function doPost(e) {
 
     appendDataRows(headers, rows);
     filterColumns();
+    addHashtagFormulaColumns();
 
     updateLogRow(runId, {
       completed_at: new Date(),

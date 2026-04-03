@@ -55,3 +55,68 @@ const filterColumns = () => {
 
   Logger.log(`[COLUMNS OK] Deleted ${deletedNames.length} column(s): ${deletedNames.join(', ')}`);
 };
+
+/**
+ * data シートにキーワード抽出列を追加する共通処理。
+ * hashtags 列から指定キーワードに一致する値を REGEXEXTRACT で抽出。
+ */
+const addExtractColumn = (propertyKey, headerName) => {
+  const keyword = PropertiesService.getScriptProperties().getProperty(propertyKey);
+  if (!keyword) {
+    Logger.log(`[EXTRACT SKIP] ${propertyKey} is not set.`);
+    return;
+  }
+
+  const sheet = getSheet('data');
+  const lastRow = sheet.getLastRow();
+  if (lastRow <= 1) {
+    Logger.log(`[EXTRACT SKIP] data sheet has no data rows.`);
+    return;
+  }
+
+  // ヘッダーを毎回読み直す（前の列追加で変わっている可能性がある）
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+
+  const hashtagCol = headers.indexOf('hashtags');
+  if (hashtagCol === -1) {
+    Logger.log('[EXTRACT WARN] "hashtags" column not found in data sheet.');
+    return;
+  }
+  const hashtagColLetter = columnToLetter(hashtagCol + 1);
+
+  let formulaColIndex = headers.indexOf(headerName);
+  if (formulaColIndex === -1) {
+    formulaColIndex = headers.length;
+    sheet.getRange(1, formulaColIndex + 1).setValue(headerName);
+  }
+
+  const escapedKeyword = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const formulas = [];
+  for (let row = 2; row <= lastRow; row++) {
+    formulas.push([`=IFERROR(REGEXEXTRACT(${hashtagColLetter}${row},"${escapedKeyword}"),"")`]);
+  }
+
+  sheet.getRange(2, formulaColIndex + 1, formulas.length, 1).setFormulas(formulas);
+  Logger.log(`[EXTRACT OK] Added "${headerName}" column with keyword "${keyword}".`);
+};
+
+/**
+ * UploadedBy / SponsoredBy の2列を追加する。
+ */
+const addHashtagFormulaColumns = () => {
+  addExtractColumn('UploadedBy', 'uploaded_by');
+  addExtractColumn('SponsoredBy', 'sponsored_by');
+};
+
+/**
+ * 列番号（1-indexed）をアルファベット列名に変換する。
+ */
+const columnToLetter = (col) => {
+  let letter = '';
+  while (col > 0) {
+    const mod = (col - 1) % 26;
+    letter = String.fromCharCode(65 + mod) + letter;
+    col = Math.floor((col - 1) / 26);
+  }
+  return letter;
+};
