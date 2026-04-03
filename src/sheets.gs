@@ -18,41 +18,75 @@ const getSheet = (sheetName) => {
 };
 
 /**
- * dataシートにデータを追記する（動的ヘッダー対応）。
+ * dataシートにデータを上書きする。
+ * 期間が変わった場合は旧シートをアーカイブしてから書き込む。
  */
-const appendDataRows = (headers, rows) => {
+const writeDataRows = (headers, rows) => {
   if (!rows || rows.length === 0) return;
+
+  checkAndArchive();
 
   const sheet = getSheet('data');
   const lastRow = sheet.getLastRow();
 
-  if (lastRow === 0) {
-    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-    sheet.getRange(2, 1, rows.length, rows[0].length).setValues(rows);
+  // シートにデータがあればクリア
+  if (lastRow > 0) {
+    sheet.clear();
+  }
+
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  sheet.getRange(2, 1, rows.length, rows[0].length).setValues(rows);
+};
+
+/**
+ * Apifyタスクの期間が変わったかチェックし、変わっていたらdataシートをアーカイブする。
+ */
+const checkAndArchive = () => {
+  const props = PropertiesService.getScriptProperties();
+  const currentPeriod = fetchTaskPeriod();
+  const lastPeriod = props.getProperty('LAST_PERIOD');
+
+  // 期間を保存（初回 or 更新）
+  props.setProperty('LAST_PERIOD', currentPeriod);
+
+  // 初回実行 or 期間変更なし → アーカイブ不要
+  if (!lastPeriod || lastPeriod === currentPeriod) {
     return;
   }
 
-  let existingHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-
-  const existingSet = new Set(existingHeaders);
-  const newKeys = headers.filter((h) => !existingSet.has(h));
-
-  if (newKeys.length > 0) {
-    const startCol = existingHeaders.length + 1;
-    sheet.getRange(1, startCol, 1, newKeys.length).setValues([newKeys]);
-    existingHeaders = [...existingHeaders, ...newKeys];
+  // 期間が変わった → 旧dataシートをアーカイブ
+  const ss = getSpreadsheet();
+  const dataSheet = ss.getSheetByName('data');
+  if (!dataSheet || dataSheet.getLastRow() <= 1) {
+    return;
   }
 
-  const headerIndexMap = new Map(headers.map((h, i) => [h, i]));
+  // 旧期間からアーカイブ名を生成: "M/D-M/D"
+  const archiveName = formatPeriodName(lastPeriod);
 
-  const alignedRows = rows.map((row) =>
-    existingHeaders.map((h) => {
-      const idx = headerIndexMap.get(h);
-      return idx !== undefined ? row[idx] : '';
-    })
-  );
+  // 同名シートが既にあれば番号付きにする
+  let finalName = archiveName;
+  let counter = 1;
+  while (ss.getSheetByName(finalName)) {
+    finalName = `${archiveName}_${counter}`;
+    counter++;
+  }
 
-  sheet.getRange(lastRow + 1, 1, alignedRows.length, alignedRows[0].length).setValues(alignedRows);
+  dataSheet.setName(finalName);
+  Logger.log(`[ARCHIVE] data sheet archived as "${finalName}"`);
+};
+
+/**
+ * 期間文字列 "YYYY-MM-DD_YYYY-MM-DD" を "M/D-M/D" 形式に変換する。
+ */
+const formatPeriodName = (periodStr) => {
+  const [sinceStr, untilStr] = periodStr.split('_');
+  const formatDate = (dateStr) => {
+    if (!dateStr) return '?';
+    const d = new Date(dateStr);
+    return `${d.getMonth() + 1}/${d.getDate()}`;
+  };
+  return `${formatDate(untilStr)}-${formatDate(sinceStr)}`;
 };
 
 /**

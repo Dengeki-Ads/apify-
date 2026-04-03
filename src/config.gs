@@ -43,6 +43,30 @@ const buildDatasetUrl = (datasetId) => {
 };
 
 /**
+ * Apify Task APIから現在のタスク入力設定を取得する。
+ */
+const fetchTaskInput = () => {
+  const apiKey = getConfig('APIFY_API_KEY');
+  const taskId = getConfig('APIFY_TASK_ID');
+  const url = `https://api.apify.com/v2/actor-tasks/${taskId}?token=${apiKey}`;
+  const response = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+  if (response.getResponseCode() !== 200) {
+    throw new Error(`Failed to fetch task input (HTTP ${response.getResponseCode()})`);
+  }
+  return JSON.parse(response.getContentText()).data.input;
+};
+
+/**
+ * Apifyタスクの期間文字列を返す（"since_until" 形式）。
+ */
+const fetchTaskPeriod = () => {
+  const input = fetchTaskInput();
+  const since = input.since || '';
+  const until = input.until || '';
+  return `${since}_${until}`;
+};
+
+/**
  * COLUMNS_TO_KEEP をパースし、常に保持する列を付与して返す。
  */
 const getColumnsToKeep = () => {

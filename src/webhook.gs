@@ -69,7 +69,7 @@ function doPost(e) {
       return row;
     });
 
-    appendDataRows(headers, rows);
+    writeDataRows(headers, rows);
     filterColumns();
     addHashtagFormulaColumns();
 
