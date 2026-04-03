@@ -94,15 +94,18 @@ const addExtractColumn = (propertyKey, headerName) => {
   // REGEXREPLACE ルールを取得（例: "belmise:ベルミス"）
   const replaceRule = props.getProperty(`${propertyKey}_Replace`);
 
+  // プロパティ値の前後のクオートを除去
+  const cleanKeyword = keyword.replace(/^"+|"+$/g, '');
+
   // 数式を組み立て: LOWER + TRIM → (REGEXREPLACE) → REGEXEXTRACT
   const formulas = [];
   for (let row = 2; row <= lastRow; row++) {
     let innerExpr = `LOWER(TRIM(${hashtagColLetter}${row}))`;
     if (replaceRule) {
-      const [from, to] = replaceRule.split(':');
+      const [from, to] = replaceRule.split(':').map((s) => s.replace(/^"+|"+$/g, ''));
       innerExpr = `REGEXREPLACE(${innerExpr},"${from}","${to}")`;
     }
-    formulas.push([`=IFERROR(REGEXEXTRACT(${innerExpr},"${keyword}"),"")`]);
+    formulas.push([`=IFERROR(REGEXEXTRACT(${innerExpr},"${cleanKeyword}"),"")`]);
   }
 
   sheet.getRange(2, formulaColIndex + 1, formulas.length, 1).setFormulas(formulas);
