@@ -113,11 +113,48 @@ const addExtractColumn = (propertyKey, headerName) => {
 };
 
 /**
- * UploadedBy / SponsoredBy の2列を追加する。
+ * uploadedAtFormatted 列から月を抽出して「X月」形式の列を追加する。
+ */
+const addUploadMonthColumn = () => {
+  const sheet = getSheet('data');
+  const lastRow = sheet.getLastRow();
+  if (lastRow <= 1) {
+    Logger.log('[MONTH SKIP] data sheet has no data rows.');
+    return;
+  }
+
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+
+  const dateCol = headers.indexOf('uploadedAtFormatted');
+  if (dateCol === -1) {
+    Logger.log('[MONTH WARN] "uploadedAtFormatted" column not found.');
+    return;
+  }
+  const dateColLetter = columnToLetter(dateCol + 1);
+
+  const headerName = 'upload_month';
+  let formulaColIndex = headers.indexOf(headerName);
+  if (formulaColIndex === -1) {
+    formulaColIndex = headers.length;
+    sheet.getRange(1, formulaColIndex + 1).setValue(headerName);
+  }
+
+  const formulas = [];
+  for (let row = 2; row <= lastRow; row++) {
+    formulas.push([`=IFERROR(MONTH(${dateColLetter}${row})&"月","")`]);
+  }
+
+  sheet.getRange(2, formulaColIndex + 1, formulas.length, 1).setFormulas(formulas);
+  Logger.log(`[MONTH OK] Added "upload_month" column.`);
+};
+
+/**
+ * UploadedBy / SponsoredBy / upload_month の列を追加する。
  */
 const addHashtagFormulaColumns = () => {
   addExtractColumn('UploadedBy', 'uploaded_by');
   addExtractColumn('SponsoredBy', 'sponsored_by');
+  addUploadMonthColumn();
 };
 
 /**

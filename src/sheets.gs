@@ -18,19 +18,13 @@ const getSheet = (sheetName) => {
 };
 
 /**
- * dataシートにデータを上書きする。
- * 期間が変わった場合は旧シートをアーカイブしてから書き込む。
+ * dataシートをクリアしてデータを上書きする。
  */
-const writeDataRows = (headers, rows) => {
+const overwriteDataSheet = (headers, rows) => {
   if (!rows || rows.length === 0) return;
 
-  checkAndArchive();
-
   const sheet = getSheet('data');
-  const lastRow = sheet.getLastRow();
-
-  // シートにデータがあればクリア
-  if (lastRow > 0) {
+  if (sheet.getLastRow() > 0) {
     sheet.clear();
   }
 

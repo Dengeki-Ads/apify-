@@ -69,9 +69,11 @@ function doPost(e) {
       return row;
     });
 
-    writeDataRows(headers, rows);
+    checkAndArchive();
+    overwriteDataSheet(headers, rows);
     filterColumns();
     addHashtagFormulaColumns();
+    syncToLookerStudio();
 
     updateLogRow(runId, {
       completed_at: new Date(),
