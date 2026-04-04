@@ -8,6 +8,12 @@
 function doPost(e) {
   try {
     const payload = JSON.parse(e.postData.contents);
+
+    // ルーティング: token フィールドがあればプロパティ更新API
+    if (payload.token !== undefined) {
+      return handlePropertyUpdate(payload);
+    }
+
     const runId = payload.resource.id;
     const runStatus = payload.resource.status;
     const datasetId = payload.resource.defaultDatasetId;
