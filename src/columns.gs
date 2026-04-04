@@ -141,7 +141,7 @@ const addUploadMonthColumn = () => {
 
   const formulas = [];
   for (let row = 2; row <= lastRow; row++) {
-    formulas.push([`=IFERROR(MONTH(${dateColLetter}${row})&"月","")`]);
+    formulas.push([`=IFERROR(REGEXEXTRACT(${dateColLetter}${row},"-(\\\d{2})-")*1&"月","")`]);
   }
 
   sheet.getRange(2, formulaColIndex + 1, formulas.length, 1).setFormulas(formulas);
