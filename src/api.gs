@@ -3,7 +3,7 @@
  */
 
 /** 更新を許可するキーのホワイトリスト */
-const ALLOWED_KEYS = ['SponsoredBy'];
+const ALLOWED_KEYS = ['SponsoredBy', 'UploadedBy', 'START_URLS'];
 
 /**
  * プロパティ更新リクエストを処理する。
