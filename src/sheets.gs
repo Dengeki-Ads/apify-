@@ -195,7 +195,14 @@ const saveRawSpreadsheet = (headers, rows, meta) => {
   const now = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyyMMdd_HHmmss');
   const fileName = `raw_apify_${now}`;
 
-  const ss = SpreadsheetApp.create(fileName);
+  // 月別サブフォルダを取得/作成
+  const parentFolder = DriveApp.getFolderById(folderId);
+  const monthLabel = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM');
+  const monthFolder = getOrCreateSubfolder(parentFolder, monthLabel);
+
+  // 空のスプレッドシートをフォルダ内に直接作成
+  const blankFile = monthFolder.createFile(fileName, '', MimeType.GOOGLE_SHEETS);
+  const ss = SpreadsheetApp.openById(blankFile.getId());
 
   // raw_data シート
   const rawSheet = ss.getActiveSheet();
@@ -217,13 +224,6 @@ const saveRawSpreadsheet = (headers, rows, meta) => {
   ];
   metaSheet.getRange(1, 1, 1, metaHeaders.length).setValues([metaHeaders]);
   metaSheet.getRange(2, 1, 1, metaValues.length).setValues([metaValues]);
-
-  // 月別サブフォルダに移動（なければ自動作成）
-  const file = DriveApp.getFileById(ss.getId());
-  const parentFolder = DriveApp.getFolderById(folderId);
-  const monthLabel = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM');
-  const monthFolder = getOrCreateSubfolder(parentFolder, monthLabel);
-  file.moveTo(monthFolder);
 
   Logger.log(`[RAW OK] Saved "${fileName}" to Drive folder "${monthLabel}". FileID: ${ss.getId()}`);
   return {
