@@ -67,6 +67,16 @@ const fetchTaskPeriod = () => {
 };
 
 /**
+ * Apify Taskの現在の取得期間をログに表示する。手動実行用。
+ */
+function checkPeriod() {
+  const input = fetchTaskInput();
+  Logger.log(`since: ${input.since}`);
+  Logger.log(`until: ${input.until}`);
+  Logger.log(JSON.stringify(input, null, 2));
+}
+
+/**
  * COLUMNS_TO_KEEP をパースし、常に保持する列を付与して返す。
  */
 const getColumnsToKeep = () => {
