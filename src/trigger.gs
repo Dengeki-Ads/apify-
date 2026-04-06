@@ -79,6 +79,57 @@ function runDailyJob() {
 }
 
 /**
+ * Script PropertiesのSTART_URLSを使ってApify Actorを起動する。
+ * START_URLS: カンマ区切りのTikTok URL（例: "https://www.tiktok.com/@user1,https://www.tiktok.com/@user2"）
+ * 期間は自動計算。手動で1回実行する想定。
+ */
+function runWithCustomUrls() {
+  const raw = getConfig('START_URLS');
+  const startUrls = raw.split(',').map((s) => s.trim()).filter((s) => s);
+
+  if (startUrls.length === 0) {
+    throw new Error('START_URLS is empty.');
+  }
+
+  const webhookUrl = getConfig('GAS_WEBAPP_URL');
+  const now = new Date();
+  const firstOfMonth = Utilities.formatDate(new Date(now.getFullYear(), now.getMonth(), 1), 'Asia/Tokyo', 'yyyy-MM-dd');
+  const firstOfNextMonth = Utilities.formatDate(new Date(now.getFullYear(), now.getMonth() + 1, 1), 'Asia/Tokyo', 'yyyy-MM-dd');
+
+  const webhooks = [{
+    eventTypes: [
+      'ACTOR.RUN.SUCCEEDED',
+      'ACTOR.RUN.FAILED',
+      'ACTOR.RUN.TIMED_OUT',
+      'ACTOR.RUN.ABORTED',
+    ],
+    requestUrl: webhookUrl,
+  }];
+  const webhooksParam = Utilities.base64Encode(JSON.stringify(webhooks));
+  const url = `${buildTaskRunUrl()}&webhooks=${encodeURIComponent(webhooksParam)}`;
+
+  const response = UrlFetchApp.fetch(url, {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify({
+      since: firstOfNextMonth,
+      until: firstOfMonth,
+      startUrls: startUrls,
+    }),
+    muteHttpExceptions: true,
+  });
+
+  const statusCode = response.getResponseCode();
+  const body = JSON.parse(response.getContentText());
+
+  if (statusCode !== 201) {
+    throw new Error(`Apify API error (HTTP ${statusCode}): ${JSON.stringify(body)}`);
+  }
+
+  Logger.log(`Actor run started with ${startUrls.length} custom URLs. RunID: ${body.data.id}`);
+}
+
+/**
  * 毎日のタイマートリガーを作成する。手動で1回実行。
  */
 function setupDailyTrigger() {
