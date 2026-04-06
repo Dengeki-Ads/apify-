@@ -106,3 +106,18 @@ const getColumnsToKeep = () => {
   const raw = getConfig('COLUMNS_TO_KEEP');
   return raw.split(',').map((s) => s.trim()).filter((s) => s);
 };
+
+/**
+ * 統合シート名を取得する。未設定時は「統合」。
+ */
+const getConsolidatedSheetName = () => {
+  const name = PropertiesService.getScriptProperties().getProperty('CONSOLIDATED_SHEET_NAME');
+  return name || '統合';
+};
+
+/**
+ * スクリプトプロパティからキーを取得する。未設定時はnullを返す（エラーなし）。
+ */
+const getOptionalConfig = (key) => {
+  return PropertiesService.getScriptProperties().getProperty(key);
+};

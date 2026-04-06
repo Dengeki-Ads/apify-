@@ -3,22 +3,74 @@
  */
 
 /**
+ * 実行日から対象期間リストを返す。
+ * 当月は毎日、先月は21日のみ。
+ */
+const determineTargetPeriods = (baseDate) => {
+  const periods = [];
+  const tz = 'Asia/Tokyo';
+  const now = new Date(baseDate);
+
+  // 当月
+  periods.push(buildMonthPeriod(now, 0));
+
+  // 毎月21日は先月も対象
+  const day = parseInt(Utilities.formatDate(now, tz, 'dd'), 10);
+  if (day === 21) {
+    periods.push(buildMonthPeriod(now, -1));
+  }
+
+  return periods;
+};
+
+/**
+ * 基準日からoffsetMonth分ずらした月の期間を生成する。
+ * Apifyの仕様: since=期間終了日, until=期間開始日
+ */
+const buildMonthPeriod = (baseDate, offsetMonth) => {
+  const tz = 'Asia/Tokyo';
+  const year = baseDate.getFullYear();
+  const month = baseDate.getMonth() + offsetMonth;
+
+  const firstOfMonth = new Date(year, month, 1);
+  const firstOfNextMonth = new Date(year, month + 1, 1);
+
+  const until = Utilities.formatDate(firstOfMonth, tz, 'yyyy-MM-dd');
+  const since = Utilities.formatDate(firstOfNextMonth, tz, 'yyyy-MM-dd');
+  const monthLabel = Utilities.formatDate(firstOfMonth, tz, 'yyyy-MM');
+
+  return { since, until, month: monthLabel };
+};
+
+/**
+ * 月ラベルからシート名を返す。
+ */
+const getMonthSheetName = (monthLabel) => {
+  return monthLabel;
+};
+
+/**
  * メイン関数。定時トリガーまたは手動で実行する。
+ * 対象月ごとにApify Taskを起動する。
  */
 function runDailyJob() {
+  const baseDate = new Date();
+  const periods = determineTargetPeriods(baseDate);
+
+  periods.forEach((period) => {
+    startApifyTask(period);
+  });
+}
+
+/**
+ * 対象期間でApify Taskを起動する。
+ */
+const startApifyTask = (period) => {
   let runId = null;
 
   try {
     const webhookUrl = getConfig('GAS_WEBAPP_URL');
 
-    // 実行月の期間を自動計算
-    // Apifyの仕様: since=期間終了日, until=期間開始日
-    const now = new Date();
-    const firstOfMonth = Utilities.formatDate(new Date(now.getFullYear(), now.getMonth(), 1), 'Asia/Tokyo', 'yyyy-MM-dd');
-    const firstOfNextMonth = Utilities.formatDate(new Date(now.getFullYear(), now.getMonth() + 1, 1), 'Asia/Tokyo', 'yyyy-MM-dd');
-
-    // Task APIを使用（期間のみオーバーライド）
-    // webhooksはBase64エンコードしてクエリパラメータで渡す
     const webhooks = [{
       eventTypes: [
         'ACTOR.RUN.SUCCEEDED',
@@ -35,8 +87,8 @@ function runDailyJob() {
       method: 'post',
       contentType: 'application/json',
       payload: JSON.stringify({
-        since: firstOfNextMonth,
-        until: firstOfMonth,
+        since: period.since,
+        until: period.until,
       }),
       muteHttpExceptions: true,
     });
@@ -53,34 +105,37 @@ function runDailyJob() {
     appendLogRow({
       triggered_at: new Date(),
       run_id: runId,
+      target_period: `${period.until} ~ ${period.since}`,
+      target_month: period.month,
       status: '実行中',
     });
 
-    // 今回の期間をScript Propertiesに保存（checkAndArchiveで参照）
-    PropertiesService.getScriptProperties().setProperty('CURRENT_PERIOD', `${firstOfNextMonth}_${firstOfMonth}`);
+    PropertiesService.getScriptProperties().setProperty('CURRENT_PERIOD', `${period.since}_${period.until}`);
 
-    Logger.log(`Actor run started. RunID: ${runId}, period: ${firstOfMonth} - ${firstOfNextMonth}`);
+    Logger.log(`Actor run started. RunID: ${runId}, month: ${period.month}, period: ${period.until} - ${period.since}`);
 
   } catch (e) {
-    Logger.log(`runDailyJob failed: ${e.message}`);
+    Logger.log(`startApifyTask failed: ${e.message}`);
 
     appendLogRow({
       triggered_at: new Date(),
       run_id: runId || '',
+      target_period: `${period.until} ~ ${period.since}`,
+      target_month: period.month,
       status: '失敗',
       error_detail: e.message,
     });
 
     sendErrorNotification(
       'TikTok Scraper: Actor起動失敗',
-      `runDailyJob() でエラーが発生しました。\n\n${e.message}`
+      `startApifyTask() でエラーが発生しました。\nMonth: ${period.month}\n\n${e.message}`
     );
   }
-}
+};
 
 /**
  * Script PropertiesのSTART_URLSを使ってApify Actorを起動する。
- * START_URLS: カンマ区切りのTikTok URL（例: "https://www.tiktok.com/@user1,https://www.tiktok.com/@user2"）
+ * START_URLS: カンマ区切りのTikTok URL
  * 期間は自動計算。手動で1回実行する想定。
  */
 function runWithCustomUrls() {
@@ -92,9 +147,7 @@ function runWithCustomUrls() {
   }
 
   const webhookUrl = getConfig('GAS_WEBAPP_URL');
-  const now = new Date();
-  const firstOfMonth = Utilities.formatDate(new Date(now.getFullYear(), now.getMonth(), 1), 'Asia/Tokyo', 'yyyy-MM-dd');
-  const firstOfNextMonth = Utilities.formatDate(new Date(now.getFullYear(), now.getMonth() + 1, 1), 'Asia/Tokyo', 'yyyy-MM-dd');
+  const period = buildMonthPeriod(new Date(), 0);
 
   const webhooks = [{
     eventTypes: [
@@ -112,8 +165,8 @@ function runWithCustomUrls() {
     method: 'post',
     contentType: 'application/json',
     payload: JSON.stringify({
-      since: firstOfNextMonth,
-      until: firstOfMonth,
+      since: period.since,
+      until: period.until,
       startUrls: startUrls,
     }),
     muteHttpExceptions: true,

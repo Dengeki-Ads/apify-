@@ -75,19 +75,51 @@ function doPost(e) {
       return row;
     });
 
-    checkAndArchive();
-    overwriteDataSheet(headers, rows);
-    filterColumns();
-    addHashtagFormulaColumns();
+    // raw原本を別スプレッドシートに保存（加工前）
+    let rawInfo = null;
+    try {
+      rawInfo = saveRawSpreadsheet(headers, rows, {
+        runId,
+        datasetId,
+        fetchedAt,
+      });
+    } catch (rawErr) {
+      Logger.log(`[RAW ERROR] ${rawErr.message}`);
+    }
+
+    // 月別シートに振り分けて書き込み
+    const grouped = groupRowsByMonth(headers, rows, dataKeys);
+    const updatedMonths = [];
+
+    for (const [monthName, monthData] of Object.entries(grouped)) {
+      overwriteMonthlySheet(monthName, headers, monthData.rows);
+      applySheetTransformations(monthName);
+      updatedMonths.push(monthName);
+    }
+
+    // 統合シート再生成
+    let consolidatedStatus = 'skip';
+    try {
+      consolidatedStatus = rebuildConsolidatedSheet();
+    } catch (consErr) {
+      Logger.log(`[CONSOLIDATED ERROR] ${consErr.message}`);
+      consolidatedStatus = 'error';
+    }
+
+    // Looker Studio同期（統合シートから）
     syncToLookerStudio();
 
     updateLogRow(runId, {
       completed_at: new Date(),
       status: '完了',
       result_count: rows.length,
+      target_month: updatedMonths.join(','),
+      raw_file_id: rawInfo ? rawInfo.fileId : '',
+      raw_file_url: rawInfo ? rawInfo.fileUrl : '',
+      consolidated_status: consolidatedStatus,
     });
 
-    Logger.log(`Webhook processed. RunID: ${runId}, Items: ${rows.length}`);
+    Logger.log(`Webhook processed. RunID: ${runId}, Items: ${rows.length}, Months: ${updatedMonths.join(',')}`);
     return ContentService.createTextOutput('OK').setMimeType(ContentService.MimeType.TEXT);
 
   } catch (err) {
@@ -121,6 +153,34 @@ const sendErrorNotification = (subject, body) => {
   const email = getConfig('NOTIFY_EMAIL');
   GmailApp.sendEmail(email, subject, body);
   Logger.log(`Error notification sent to ${email}`);
+};
+
+/**
+ * データ行を月別にグルーピングする。
+ * uploadedAtFormatted列からYYYY-MMを抽出して振り分け。
+ */
+const groupRowsByMonth = (headers, rows, dataKeys) => {
+  const dateColIndex = headers.indexOf('uploadedAtFormatted');
+  const grouped = {};
+
+  for (const row of rows) {
+    let monthName = 'unknown';
+
+    if (dateColIndex !== -1) {
+      const dateVal = String(row[dateColIndex] || '');
+      const match = dateVal.match(/^(\d{4}-\d{2})/);
+      if (match) {
+        monthName = match[1];
+      }
+    }
+
+    if (!grouped[monthName]) {
+      grouped[monthName] = { rows: [] };
+    }
+    grouped[monthName].rows.push(row);
+  }
+
+  return grouped;
 };
 
 /**

@@ -7,7 +7,7 @@
  */
 function notifyViewsSummary() {
   try {
-    const sheet = getSheet('data');
+    const sheet = getSheet(getConsolidatedSheetName());
     const lastRow = sheet.getLastRow();
     const lastCol = sheet.getLastColumn();
 
