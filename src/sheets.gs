@@ -185,6 +185,10 @@ const formatPeriodName = (periodStr) => {
 /**
  * rawデータを別スプレッドシートとしてGoogle Driveに保存する。
  */
+/**
+ * rawデータを別スプレッドシートとしてGoogle Driveに保存する。
+ * 各ステップを個別メソッドに分割して障害箇所を特定しやすくしている。
+ */
 const saveRawSpreadsheet = (headers, rows, meta) => {
   const folderId = getOptionalConfig('RAW_OUTPUT_FOLDER_ID');
   if (!folderId) {
@@ -194,19 +198,76 @@ const saveRawSpreadsheet = (headers, rows, meta) => {
 
   const now = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyyMMdd_HHmmss');
   const fileName = `raw_apify_${now}`;
-
-  // 月別サブフォルダを取得/作成
   const monthLabel = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM');
-  const monthFolderId = getOrCreateSubfolderId(folderId, monthLabel);
 
-  // Drive API v3 でスプレッドシートを直接フォルダ内に作成
+  // Step 1: 月別サブフォルダ取得/作成
+  Logger.log(`[RAW STEP1] Getting/creating subfolder "${monthLabel}" in parent "${folderId}"`);
+  const monthFolderId = getOrCreateSubfolderId(folderId, monthLabel);
+  Logger.log(`[RAW STEP1 OK] monthFolderId: ${monthFolderId}`);
+
+  // Step 2: スプレッドシート作成（フォルダ内）
+  Logger.log(`[RAW STEP2] Creating spreadsheet "${fileName}" in folder "${monthFolderId}"`);
+  const fileId = createSpreadsheetInFolder(fileName, monthFolderId);
+  Logger.log(`[RAW STEP2 OK] fileId: ${fileId}`);
+
+  // Step 3: データ書き込み
+  Logger.log(`[RAW STEP3] Writing data to spreadsheet`);
+  writeRawData(fileId, headers, rows, meta);
+  Logger.log(`[RAW STEP3 OK] Done`);
+
+  const ss = SpreadsheetApp.openById(fileId);
+  Logger.log(`[RAW OK] Saved "${fileName}" to Drive folder "${monthLabel}". FileID: ${fileId}`);
+  return {
+    fileId: fileId,
+    fileUrl: ss.getUrl(),
+  };
+};
+
+/**
+ * 親フォルダ内にサブフォルダIDを取得する。なければDrive APIで作成。
+ */
+const getOrCreateSubfolderId = (parentFolderId, folderName) => {
+  const query = `'${parentFolderId}' in parents and name = '${folderName}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
+  const result = Drive.Files.list({
+    q: query,
+    fields: 'files(id)',
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
+  });
+
+  if (result.files && result.files.length > 0) {
+    Logger.log(`[DRIVE] Found existing subfolder "${folderName}" (ID: ${result.files[0].id})`);
+    return result.files[0].id;
+  }
+
+  const folderResource = {
+    name: folderName,
+    mimeType: 'application/vnd.google-apps.folder',
+    parents: [parentFolderId],
+  };
+  const created = Drive.Files.create(folderResource, null, { supportsAllDrives: true });
+  Logger.log(`[DRIVE] Created subfolder "${folderName}" (ID: ${created.id})`);
+  return created.id;
+};
+
+/**
+ * Drive API v3 で指定フォルダ内にスプレッドシートを作成し、IDを返す。
+ */
+const createSpreadsheetInFolder = (fileName, folderId) => {
   const fileResource = {
     name: fileName,
     mimeType: 'application/vnd.google-apps.spreadsheet',
-    parents: [monthFolderId],
+    parents: [folderId],
   };
   const created = Drive.Files.create(fileResource, null, { supportsAllDrives: true });
-  const ss = SpreadsheetApp.openById(created.id);
+  return created.id;
+};
+
+/**
+ * スプレッドシートにraw_dataとmetaシートのデータを書き込む。
+ */
+const writeRawData = (fileId, headers, rows, meta) => {
+  const ss = SpreadsheetApp.openById(fileId);
 
   // raw_data シート
   const rawSheet = ss.getActiveSheet();
@@ -228,40 +289,53 @@ const saveRawSpreadsheet = (headers, rows, meta) => {
   ];
   metaSheet.getRange(1, 1, 1, metaHeaders.length).setValues([metaHeaders]);
   metaSheet.getRange(2, 1, 1, metaValues.length).setValues([metaValues]);
-
-  Logger.log(`[RAW OK] Saved "${fileName}" to Drive folder "${monthLabel}". FileID: ${created.id}`);
-  return {
-    fileId: created.id,
-    fileUrl: ss.getUrl(),
-  };
 };
 
 /**
- * 親フォルダ内にサブフォルダIDを取得する。なければDrive APIで作成。
+ * 手動テスト用: raw保存の各ステップを個別に実行して障害箇所を特定する。
  */
-const getOrCreateSubfolderId = (parentFolderId, folderName) => {
-  // 既存フォルダを検索
-  const query = `'${parentFolderId}' in parents and name = '${folderName}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
-  const result = Drive.Files.list({
-    q: query,
-    fields: 'files(id)',
-    supportsAllDrives: true,
-    includeItemsFromAllDrives: true,
-  });
-
-  if (result.files && result.files.length > 0) {
-    return result.files[0].id;
+function testRawSaveSteps() {
+  const folderId = getOptionalConfig('RAW_OUTPUT_FOLDER_ID');
+  Logger.log(`[TEST] RAW_OUTPUT_FOLDER_ID: ${folderId}`);
+  if (!folderId) {
+    Logger.log('[TEST FAIL] RAW_OUTPUT_FOLDER_ID is not set.');
+    return;
   }
 
-  // なければ作成
-  const folderResource = {
-    name: folderName,
-    mimeType: 'application/vnd.google-apps.folder',
-    parents: [parentFolderId],
-  };
-  const created = Drive.Files.create(folderResource, null, { supportsAllDrives: true });
-  Logger.log(`[DRIVE] Created subfolder "${folderName}" (ID: ${created.id})`);
-  return created.id;
+  // Step 1: 親フォルダにアクセスできるか
+  try {
+    const parentCheck = Drive.Files.get(folderId, { supportsAllDrives: true, fields: 'id,name,mimeType' });
+    Logger.log(`[TEST STEP1 OK] Parent folder: name="${parentCheck.name}", mimeType="${parentCheck.mimeType}"`);
+  } catch (e) {
+    Logger.log(`[TEST STEP1 FAIL] Cannot access parent folder: ${e.message}`);
+    return;
+  }
+
+  // Step 2: サブフォルダ作成
+  try {
+    const subId = getOrCreateSubfolderId(folderId, 'test-subfolder');
+    Logger.log(`[TEST STEP2 OK] Subfolder ID: ${subId}`);
+  } catch (e) {
+    Logger.log(`[TEST STEP2 FAIL] Cannot create subfolder: ${e.message}`);
+    return;
+  }
+
+  // Step 3: スプレッドシート作成
+  try {
+    const subId = getOrCreateSubfolderId(folderId, 'test-subfolder');
+    const ssId = createSpreadsheetInFolder('test_raw_save', subId);
+    Logger.log(`[TEST STEP3 OK] Spreadsheet created. ID: ${ssId}`);
+
+    // Step 4: データ書き込み
+    writeRawData(ssId, ['col1', 'col2'], [['a', 'b']], { runId: 'test', datasetId: 'test', fetchedAt: new Date() });
+    Logger.log(`[TEST STEP4 OK] Data written.`);
+
+    const ss = SpreadsheetApp.openById(ssId);
+    Logger.log(`[TEST DONE] URL: ${ss.getUrl()}`);
+  } catch (e) {
+    Logger.log(`[TEST STEP3-4 FAIL] ${e.message}`);
+    return;
+  }
 };
 
 /**
