@@ -140,12 +140,49 @@ const addUploadMonthColumn = (sheetName = 'data') => {
 };
 
 /**
- * UploadedBy / SponsoredBy / upload_month の列を追加する。
+ * uploadedAtFormatted 列からアップロード日（YYYY/MM/DD）を抽出する列を追加する。
+ */
+const addUploadDateColumn = (sheetName = 'data') => {
+  const sheet = getSheet(sheetName);
+  const lastRow = sheet.getLastRow();
+  if (lastRow <= 1) {
+    Logger.log(`[DATE SKIP] ${sheetName} sheet has no data rows.`);
+    return;
+  }
+
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+
+  const dateCol = headers.indexOf('uploadedAtFormatted');
+  if (dateCol === -1) {
+    Logger.log(`[DATE WARN] "uploadedAtFormatted" column not found in ${sheetName}.`);
+    return;
+  }
+  const dateColLetter = columnToLetter(dateCol + 1);
+
+  const headerName = 'upload_date';
+  let formulaColIndex = headers.indexOf(headerName);
+  if (formulaColIndex === -1) {
+    formulaColIndex = headers.length;
+    sheet.getRange(1, formulaColIndex + 1).setValue(headerName);
+  }
+
+  const formulas = [];
+  for (let row = 2; row <= lastRow; row++) {
+    formulas.push([`=IFERROR(TEXT(DATEVALUE(LEFT(${dateColLetter}${row},10)),"YYYY/MM/DD"),"")`]);
+  }
+
+  sheet.getRange(2, formulaColIndex + 1, formulas.length, 1).setFormulas(formulas);
+  Logger.log(`[DATE OK] Added "upload_date" column to ${sheetName}.`);
+};
+
+/**
+ * UploadedBy / SponsoredBy / upload_month / upload_date の列を追加する。
  */
 const addHashtagFormulaColumns = (sheetName = 'data') => {
   addExtractColumn('UploadedBy', 'uploaded_by', sheetName);
   addExtractColumn('SponsoredBy', 'sponsored_by', sheetName);
   addUploadMonthColumn(sheetName);
+  addUploadDateColumn(sheetName);
 };
 
 /**
