@@ -73,6 +73,9 @@ function checkPeriod() {
   // Task保存済み設定
   const input = fetchTaskInput();
   Logger.log('[Task設定] since: ' + input.since + ', until: ' + input.until);
+  Logger.log('[Task設定] maxItems: ' + input.maxItems);
+  Logger.log('[Task設定] startUrls数: ' + (input.startUrls ? input.startUrls.length : 'なし'));
+  Logger.log('[Task設定] 全体: ' + JSON.stringify(input, null, 2));
 
   // 直近のRunで実際に使われた入力
   const apiKey = getConfig('APIFY_API_KEY');
