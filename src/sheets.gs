@@ -218,17 +218,30 @@ const saveRawSpreadsheet = (headers, rows, meta) => {
   metaSheet.getRange(1, 1, 1, metaHeaders.length).setValues([metaHeaders]);
   metaSheet.getRange(2, 1, 1, metaValues.length).setValues([metaValues]);
 
-  // 指定フォルダに移動
+  // 月別サブフォルダに移動（なければ自動作成）
   const file = DriveApp.getFileById(ss.getId());
-  const folder = DriveApp.getFolderById(folderId);
-  folder.addFile(file);
+  const parentFolder = DriveApp.getFolderById(folderId);
+  const monthLabel = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM');
+  const monthFolder = getOrCreateSubfolder(parentFolder, monthLabel);
+  monthFolder.addFile(file);
   DriveApp.getRootFolder().removeFile(file);
 
-  Logger.log(`[RAW OK] Saved "${fileName}" to Drive. FileID: ${ss.getId()}`);
+  Logger.log(`[RAW OK] Saved "${fileName}" to Drive folder "${monthLabel}". FileID: ${ss.getId()}`);
   return {
     fileId: ss.getId(),
     fileUrl: ss.getUrl(),
   };
+};
+
+/**
+ * 親フォルダ内にサブフォルダを取得する。なければ作成。
+ */
+const getOrCreateSubfolder = (parentFolder, folderName) => {
+  const folders = parentFolder.getFoldersByName(folderName);
+  if (folders.hasNext()) {
+    return folders.next();
+  }
+  return parentFolder.createFolder(folderName);
 };
 
 /**
