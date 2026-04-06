@@ -15,8 +15,7 @@ function runDailyJob() {
     // Apifyの仕様: since=期間終了日, until=期間開始日
     const now = new Date();
     const firstOfMonth = Utilities.formatDate(new Date(now.getFullYear(), now.getMonth(), 1), 'Asia/Tokyo', 'yyyy-MM-dd');
-    const sinceDate = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-    const firstOfNextMonth = Utilities.formatDate(sinceDate, 'Asia/Tokyo', 'yyyy-MM-dd');
+    const firstOfNextMonth = Utilities.formatDate(new Date(now.getFullYear(), now.getMonth() + 1, 1), 'Asia/Tokyo', 'yyyy-MM-dd');
 
     // Task APIを使用（期間のみオーバーライド）
     // webhooksはBase64エンコードしてクエリパラメータで渡す
