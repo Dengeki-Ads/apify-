@@ -37,7 +37,8 @@ const overwriteDataSheet = (headers, rows) => {
  */
 const checkAndArchive = () => {
   const props = PropertiesService.getScriptProperties();
-  const currentPeriod = fetchTaskPeriod();
+  const currentPeriod = props.getProperty('CURRENT_PERIOD');
+  if (!currentPeriod) return;
   const lastPeriod = props.getProperty('LAST_PERIOD');
 
   // 期間を保存（初回 or 更新）

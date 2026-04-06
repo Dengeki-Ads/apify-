@@ -56,7 +56,10 @@ function runDailyJob() {
       status: '実行中',
     });
 
-    Logger.log(`Actor run started. RunID: ${runId}`);
+    // 今回の期間をScript Propertiesに保存（checkAndArchiveで参照）
+    PropertiesService.getScriptProperties().setProperty('CURRENT_PERIOD', `${firstOfNextMonth}_${firstOfMonth}`);
+
+    Logger.log(`Actor run started. RunID: ${runId}, period: ${firstOfMonth} - ${firstOfNextMonth}`);
 
   } catch (e) {
     Logger.log(`runDailyJob failed: ${e.message}`);
