@@ -196,13 +196,17 @@ const saveRawSpreadsheet = (headers, rows, meta) => {
   const fileName = `raw_apify_${now}`;
 
   // 月別サブフォルダを取得/作成
-  const parentFolder = DriveApp.getFolderById(folderId);
   const monthLabel = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM');
-  const monthFolder = getOrCreateSubfolder(parentFolder, monthLabel);
+  const monthFolderId = getOrCreateSubfolderId(folderId, monthLabel);
 
-  // 空のスプレッドシートをフォルダ内に直接作成
-  const blankFile = monthFolder.createFile(fileName, '', MimeType.GOOGLE_SHEETS);
-  const ss = SpreadsheetApp.openById(blankFile.getId());
+  // Drive API v3 でスプレッドシートを直接フォルダ内に作成
+  const fileResource = {
+    name: fileName,
+    mimeType: 'application/vnd.google-apps.spreadsheet',
+    parents: [monthFolderId],
+  };
+  const created = Drive.Files.create(fileResource, null, { supportsAllDrives: true });
+  const ss = SpreadsheetApp.openById(created.id);
 
   // raw_data シート
   const rawSheet = ss.getActiveSheet();
@@ -225,22 +229,39 @@ const saveRawSpreadsheet = (headers, rows, meta) => {
   metaSheet.getRange(1, 1, 1, metaHeaders.length).setValues([metaHeaders]);
   metaSheet.getRange(2, 1, 1, metaValues.length).setValues([metaValues]);
 
-  Logger.log(`[RAW OK] Saved "${fileName}" to Drive folder "${monthLabel}". FileID: ${ss.getId()}`);
+  Logger.log(`[RAW OK] Saved "${fileName}" to Drive folder "${monthLabel}". FileID: ${created.id}`);
   return {
-    fileId: ss.getId(),
+    fileId: created.id,
     fileUrl: ss.getUrl(),
   };
 };
 
 /**
- * 親フォルダ内にサブフォルダを取得する。なければ作成。
+ * 親フォルダ内にサブフォルダIDを取得する。なければDrive APIで作成。
  */
-const getOrCreateSubfolder = (parentFolder, folderName) => {
-  const folders = parentFolder.getFoldersByName(folderName);
-  if (folders.hasNext()) {
-    return folders.next();
+const getOrCreateSubfolderId = (parentFolderId, folderName) => {
+  // 既存フォルダを検索
+  const query = `'${parentFolderId}' in parents and name = '${folderName}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
+  const result = Drive.Files.list({
+    q: query,
+    fields: 'files(id)',
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
+  });
+
+  if (result.files && result.files.length > 0) {
+    return result.files[0].id;
   }
-  return parentFolder.createFolder(folderName);
+
+  // なければ作成
+  const folderResource = {
+    name: folderName,
+    mimeType: 'application/vnd.google-apps.folder',
+    parents: [parentFolderId],
+  };
+  const created = Drive.Files.create(folderResource, null, { supportsAllDrives: true });
+  Logger.log(`[DRIVE] Created subfolder "${folderName}" (ID: ${created.id})`);
+  return created.id;
 };
 
 /**
