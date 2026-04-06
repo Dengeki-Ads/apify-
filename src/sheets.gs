@@ -223,8 +223,7 @@ const saveRawSpreadsheet = (headers, rows, meta) => {
   const parentFolder = DriveApp.getFolderById(folderId);
   const monthLabel = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM');
   const monthFolder = getOrCreateSubfolder(parentFolder, monthLabel);
-  monthFolder.addFile(file);
-  DriveApp.getRootFolder().removeFile(file);
+  file.moveTo(monthFolder);
 
   Logger.log(`[RAW OK] Saved "${fileName}" to Drive folder "${monthLabel}". FileID: ${ss.getId()}`);
   return {
