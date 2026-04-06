@@ -11,7 +11,13 @@ function runDailyJob() {
   try {
     const webhookUrl = getConfig('GAS_WEBAPP_URL');
 
-    // Task APIを使用（Taskの保存済み入力がそのまま使われる）
+    // 実行月の期間を自動計算
+    // Apifyの仕様: since=期間終了日, until=期間開始日
+    const now = new Date();
+    const firstOfMonth = Utilities.formatDate(new Date(now.getFullYear(), now.getMonth(), 1), 'Asia/Tokyo', 'yyyy-MM-dd');
+    const firstOfNextMonth = Utilities.formatDate(new Date(now.getFullYear(), now.getMonth() + 1, 1), 'Asia/Tokyo', 'yyyy-MM-dd');
+
+    // Task APIを使用（期間のみオーバーライド）
     // webhooksはBase64エンコードしてクエリパラメータで渡す
     const webhooks = [{
       eventTypes: [
@@ -27,6 +33,11 @@ function runDailyJob() {
 
     const response = UrlFetchApp.fetch(url, {
       method: 'post',
+      contentType: 'application/json',
+      payload: JSON.stringify({
+        since: firstOfNextMonth,
+        until: firstOfMonth,
+      }),
       muteHttpExceptions: true,
     });
 
