@@ -70,10 +70,30 @@ const fetchTaskPeriod = () => {
  * Apify Taskの現在の取得期間をログに表示する。手動実行用。
  */
 function checkPeriod() {
+  // Task保存済み設定
   const input = fetchTaskInput();
-  Logger.log(`since: ${input.since}`);
-  Logger.log(`until: ${input.until}`);
-  Logger.log(JSON.stringify(input, null, 2));
+  Logger.log('[Task設定] since: ' + input.since + ', until: ' + input.until);
+
+  // 直近のRunで実際に使われた入力
+  const apiKey = getConfig('APIFY_API_KEY');
+  const taskId = getConfig('APIFY_TASK_ID');
+  const url = `https://api.apify.com/v2/actor-tasks/${taskId}/runs/last?token=${apiKey}`;
+  const response = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+  if (response.getResponseCode() === 200) {
+    const run = JSON.parse(response.getContentText()).data;
+    Logger.log('[最終Run] ID: ' + run.id + ', status: ' + run.status);
+    Logger.log('[最終Run] startedAt: ' + run.startedAt);
+    Logger.log('[最終Run] datasetId: ' + run.defaultDatasetId);
+    Logger.log('[最終Run] itemCount: ' + (run.stats && run.stats.inputItemCount));
+    // Runの入力を取得
+    const inputUrl = `https://api.apify.com/v2/key-value-stores/${run.defaultKeyValueStoreId}/records/INPUT?token=${apiKey}`;
+    const inputRes = UrlFetchApp.fetch(inputUrl, { muteHttpExceptions: true });
+    if (inputRes.getResponseCode() === 200) {
+      const runInput = JSON.parse(inputRes.getContentText());
+      Logger.log('[最終Run入力] since: ' + runInput.since + ', until: ' + runInput.until);
+      Logger.log('[最終Run入力] 全体: ' + JSON.stringify(runInput, null, 2));
+    }
+  }
 }
 
 /**
