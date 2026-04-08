@@ -71,10 +71,96 @@ const listMonthlySheets = () => {
 };
 
 /**
- * 全月別シートを連結して統合シートを再生成する。
- * 一時シートを使い、完成後に入れ替える。
+ * 統合シートを更新する。
+ * updatedMonths に含まれる月の行だけ差し替え、それ以外の月はそのまま保持する。
+ * 統合シートが存在しない場合はフルリビルドする。
  */
-const rebuildConsolidatedSheet = () => {
+const rebuildConsolidatedSheet = (updatedMonths) => {
+  const ss = getSpreadsheet();
+  const consolidatedName = getConsolidatedSheetName();
+  const consolidatedSheet = ss.getSheetByName(consolidatedName);
+
+  // 統合シートが存在しない場合はフルリビルド
+  if (!consolidatedSheet) {
+    return fullRebuildConsolidatedSheet();
+  }
+
+  // updatedMonths が未指定の場合もフルリビルド
+  if (!updatedMonths || updatedMonths.length === 0) {
+    return fullRebuildConsolidatedSheet();
+  }
+
+  SpreadsheetApp.flush();
+
+  const lastRow = consolidatedSheet.getLastRow();
+  const lastCol = consolidatedSheet.getLastColumn();
+
+  if (lastRow === 0 || lastCol === 0) {
+    return fullRebuildConsolidatedSheet();
+  }
+
+  const allData = consolidatedSheet.getRange(1, 1, lastRow, lastCol).getValues();
+  const headers = allData[0];
+
+  // uploadedAtFormatted列のインデックスを取得
+  const dateColIndex = headers.indexOf('uploadedAtFormatted');
+  if (dateColIndex === -1) {
+    Logger.log('[CONSOLIDATED WARN] uploadedAtFormatted column not found. Falling back to full rebuild.');
+    return fullRebuildConsolidatedSheet();
+  }
+
+  const updatedSet = new Set(updatedMonths);
+
+  // 更新対象月以外の行を保持
+  const keptRows = [];
+  for (let i = 1; i < allData.length; i++) {
+    const row = allData[i];
+    const dateVal = String(row[dateColIndex] || '');
+    const match = dateVal.match(/^(\d{4}-\d{2})/);
+    const rowMonth = match ? match[1] : 'unknown';
+
+    if (!updatedSet.has(rowMonth)) {
+      keptRows.push(row);
+    }
+  }
+
+  // 更新対象月のデータを月別シートから取得
+  const newRows = [];
+  for (const monthName of updatedMonths) {
+    const sheet = ss.getSheetByName(monthName);
+    if (!sheet || sheet.getLastRow() <= 1) continue;
+
+    const mLastRow = sheet.getLastRow();
+    const mLastCol = sheet.getLastColumn();
+    const mData = sheet.getRange(1, 1, mLastRow, mLastCol).getValues();
+
+    for (let i = 1; i < mData.length; i++) {
+      const row = mData[i];
+      if (row.every((cell) => cell === '' || cell === null)) continue;
+      newRows.push(row);
+    }
+  }
+
+  const finalRows = [...keptRows, ...newRows];
+
+  if (finalRows.length === 0) {
+    Logger.log('[CONSOLIDATED SKIP] No data after merge.');
+    return 'skip';
+  }
+
+  // 統合シートを上書き
+  consolidatedSheet.clear();
+  consolidatedSheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  consolidatedSheet.getRange(2, 1, finalRows.length, finalRows[0].length).setValues(finalRows);
+
+  Logger.log(`[CONSOLIDATED OK] ${consolidatedName}: ${finalRows.length} rows (kept: ${keptRows.length}, updated: ${newRows.length} from ${updatedMonths.join(',')}).`);
+  return 'ok';
+};
+
+/**
+ * 統合シートをゼロからフルリビルドする。初回作成時や復旧用。
+ */
+const fullRebuildConsolidatedSheet = () => {
   const ss = getSpreadsheet();
   const consolidatedName = getConsolidatedSheetName();
   const tmpName = consolidatedName + '_tmp';
@@ -85,12 +171,10 @@ const rebuildConsolidatedSheet = () => {
     return 'skip';
   }
 
-  // 一時シート作成
   let tmpSheet = ss.getSheetByName(tmpName);
   if (tmpSheet) ss.deleteSheet(tmpSheet);
   tmpSheet = ss.insertSheet(tmpName);
 
-  // 数式の計算結果を確定させる
   SpreadsheetApp.flush();
 
   let headers = null;
@@ -108,7 +192,6 @@ const rebuildConsolidatedSheet = () => {
       headers = data[0];
     }
 
-    // データ行を追加（ヘッダー除く、空行除外）
     for (let i = 1; i < data.length; i++) {
       const row = data[i];
       if (row.every((cell) => cell === '' || cell === null)) continue;
@@ -122,16 +205,14 @@ const rebuildConsolidatedSheet = () => {
     return 'skip';
   }
 
-  // 一時シートに書き込み
   tmpSheet.getRange(1, 1, 1, headers.length).setValues([headers]);
   tmpSheet.getRange(2, 1, allRows.length, allRows[0].length).setValues(allRows);
 
-  // 旧統合シートと入れ替え
   const oldSheet = ss.getSheetByName(consolidatedName);
   if (oldSheet) ss.deleteSheet(oldSheet);
   tmpSheet.setName(consolidatedName);
 
-  Logger.log(`[CONSOLIDATED OK] ${consolidatedName}: ${allRows.length} rows from ${monthlyNames.length} monthly sheets.`);
+  Logger.log(`[CONSOLIDATED FULL OK] ${consolidatedName}: ${allRows.length} rows from ${monthlyNames.length} monthly sheets.`);
   return 'ok';
 };
 

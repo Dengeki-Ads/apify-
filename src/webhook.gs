@@ -100,7 +100,7 @@ function doPost(e) {
     // 統合シート再生成
     let consolidatedStatus = 'skip';
     try {
-      consolidatedStatus = rebuildConsolidatedSheet();
+      consolidatedStatus = rebuildConsolidatedSheet(updatedMonths);
     } catch (consErr) {
       Logger.log(`[CONSOLIDATED ERROR] ${consErr.message}`);
       consolidatedStatus = 'error';
