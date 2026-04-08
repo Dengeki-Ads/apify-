@@ -188,6 +188,14 @@ const writeRowsToSheet = (sheet, headers, rows) => {
 };
 
 /**
+ * 統合シートを手動でフルリビルドする。GASエディタから実行する想定。
+ */
+function rebuildConsolidatedManual() {
+  const result = fullRebuildConsolidatedSheet();
+  Logger.log(`[MANUAL] Consolidated rebuild result: ${result}`);
+}
+
+/**
  * Apifyタスクの期間が変わったかチェックし、変わっていたらdataシートをアーカイブする。
  */
 const checkAndArchive = () => {
