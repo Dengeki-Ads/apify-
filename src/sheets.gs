@@ -99,7 +99,9 @@ const rebuildConsolidatedSheet = (updatedMonths) => {
     return fullRebuildConsolidatedSheet();
   }
 
-  const allData = consolidatedSheet.getRange(1, 1, lastRow, lastCol).getValues();
+  const range = consolidatedSheet.getRange(1, 1, lastRow, lastCol);
+  const allData = range.getValues();
+  const displayData = range.getDisplayValues();
   const headers = allData[0];
 
   // uploadedAtFormatted列のインデックスを取得
@@ -109,9 +111,12 @@ const rebuildConsolidatedSheet = (updatedMonths) => {
     return fullRebuildConsolidatedSheet();
   }
 
+  // 日付変換されてしまう列を特定
+  const dateSafeCols = findDateSafeCols(headers);
+
   const updatedSet = new Set(updatedMonths);
 
-  // 更新対象月以外の行を保持
+  // 更新対象月以外の行を保持（手動貼り付けデータ含む）
   const keptRows = [];
   for (let i = 1; i < allData.length; i++) {
     const row = allData[i];
@@ -120,26 +125,16 @@ const rebuildConsolidatedSheet = (updatedMonths) => {
     const rowMonth = match ? match[1] : 'unknown';
 
     if (!updatedSet.has(rowMonth)) {
+      // 保持する行の日付列を表示値で補正
+      for (const c of dateSafeCols) {
+        row[c] = displayData[i][c];
+      }
       keptRows.push(row);
     }
   }
 
-  // 更新対象月のデータを月別シートから取得
-  const newRows = [];
-  for (const monthName of updatedMonths) {
-    const sheet = ss.getSheetByName(monthName);
-    if (!sheet || sheet.getLastRow() <= 1) continue;
-
-    const mLastRow = sheet.getLastRow();
-    const mLastCol = sheet.getLastColumn();
-    const mData = sheet.getRange(1, 1, mLastRow, mLastCol).getValues();
-
-    for (let i = 1; i < mData.length; i++) {
-      const row = mData[i];
-      if (row.every((cell) => cell === '' || cell === null)) continue;
-      newRows.push(row);
-    }
-  }
+  // 更新対象月のデータを月別シートから取得（表示値で日付列を補正）
+  const newRows = readMonthlySheetRows(ss, updatedMonths, headers);
 
   const finalRows = [...keptRows, ...newRows];
 
@@ -171,6 +166,9 @@ const fullRebuildConsolidatedSheet = () => {
     return 'skip';
   }
 
+  // 既存の統合シートから手動貼り付けデータを保持
+  const manualRows = extractManualRows(ss, consolidatedName, monthlyNames);
+
   let tmpSheet = ss.getSheetByName(tmpName);
   if (tmpSheet) ss.deleteSheet(tmpSheet);
   tmpSheet = ss.insertSheet(tmpName);
@@ -186,18 +184,28 @@ const fullRebuildConsolidatedSheet = () => {
 
     const lastRow = sheet.getLastRow();
     const lastCol = sheet.getLastColumn();
-    const data = sheet.getRange(1, 1, lastRow, lastCol).getValues();
+    const range = sheet.getRange(1, 1, lastRow, lastCol);
+    const data = range.getValues();
+    const display = range.getDisplayValues();
 
     if (!headers) {
       headers = data[0];
     }
 
+    const dateSafeCols = findDateSafeCols(headers);
+
     for (let i = 1; i < data.length; i++) {
       const row = data[i];
       if (row.every((cell) => cell === '' || cell === null)) continue;
+      for (const c of dateSafeCols) {
+        row[c] = display[i][c];
+      }
       allRows.push(row);
     }
   }
+
+  // 手動データを追加
+  allRows = [...allRows, ...manualRows];
 
   if (!headers || allRows.length === 0) {
     ss.deleteSheet(tmpSheet);
@@ -212,8 +220,91 @@ const fullRebuildConsolidatedSheet = () => {
   if (oldSheet) ss.deleteSheet(oldSheet);
   tmpSheet.setName(consolidatedName);
 
-  Logger.log(`[CONSOLIDATED FULL OK] ${consolidatedName}: ${allRows.length} rows from ${monthlyNames.length} monthly sheets.`);
+  Logger.log(`[CONSOLIDATED FULL OK] ${consolidatedName}: ${allRows.length} rows (manual: ${manualRows.length}) from ${monthlyNames.length} monthly sheets.`);
   return 'ok';
+};
+
+/**
+ * 月別シートからデータ行を読み取る。日付列は表示値で補正。
+ */
+const readMonthlySheetRows = (ss, monthNames, headers) => {
+  const dateSafeCols = findDateSafeCols(headers);
+  const rows = [];
+
+  for (const monthName of monthNames) {
+    const sheet = ss.getSheetByName(monthName);
+    if (!sheet || sheet.getLastRow() <= 1) continue;
+
+    const mLastRow = sheet.getLastRow();
+    const mLastCol = sheet.getLastColumn();
+    const range = sheet.getRange(1, 1, mLastRow, mLastCol);
+    const mData = range.getValues();
+    const mDisplay = range.getDisplayValues();
+
+    for (let i = 1; i < mData.length; i++) {
+      const row = mData[i];
+      if (row.every((cell) => cell === '' || cell === null)) continue;
+      for (const c of dateSafeCols) {
+        row[c] = mDisplay[i][c];
+      }
+      rows.push(row);
+    }
+  }
+
+  return rows;
+};
+
+/**
+ * upload_month, upload_date 列のインデックスを返す。
+ */
+const findDateSafeCols = (headers) => {
+  const cols = [];
+  headers.forEach((h, i) => {
+    if (h === 'upload_month' || h === 'upload_date') {
+      cols.push(i);
+    }
+  });
+  return cols;
+};
+
+/**
+ * 統合シートからどの月別シートにも属さない手動データ行を抽出する。
+ */
+const extractManualRows = (ss, consolidatedName, monthlyNames) => {
+  const consolidatedSheet = ss.getSheetByName(consolidatedName);
+  if (!consolidatedSheet || consolidatedSheet.getLastRow() <= 1) return [];
+
+  const lastRow = consolidatedSheet.getLastRow();
+  const lastCol = consolidatedSheet.getLastColumn();
+  const range = consolidatedSheet.getRange(1, 1, lastRow, lastCol);
+  const allData = range.getValues();
+  const displayData = range.getDisplayValues();
+  const headers = allData[0];
+
+  const dateColIndex = headers.indexOf('uploadedAtFormatted');
+  const monthlySet = new Set(monthlyNames);
+  const dateSafeCols = findDateSafeCols(headers);
+
+  const manualRows = [];
+  for (let i = 1; i < allData.length; i++) {
+    const row = allData[i];
+    let rowMonth = 'unknown';
+    if (dateColIndex !== -1) {
+      const dateVal = String(row[dateColIndex] || '');
+      const match = dateVal.match(/^(\d{4}-\d{2})/);
+      if (match) rowMonth = match[1];
+    }
+
+    // 月別シートに対応しない行 = 手動データ
+    if (!monthlySet.has(rowMonth)) {
+      for (const c of dateSafeCols) {
+        row[c] = displayData[i][c];
+      }
+      manualRows.push(row);
+    }
+  }
+
+  return manualRows;
 };
 
 /**
