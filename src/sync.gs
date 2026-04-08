@@ -5,6 +5,7 @@
 /**
  * 指定シートの内容を Looker Studio 用スプレッドシートに上書き同期する。
  * DEST_SPREADSHEET_ID または DEST_SHEET_NAME が未設定の場合はスキップ。
+ * 全セルを書式なしテキストに設定して日付自動変換を防止する。
  */
 const syncToLookerStudio = (sourceSheetName) => {
   const effectiveSource = sourceSheetName || getConsolidatedSheetName();
@@ -18,7 +19,6 @@ const syncToLookerStudio = (sourceSheetName) => {
     return;
   }
 
-  // 数式の計算結果を確定させる
   SpreadsheetApp.flush();
 
   const ss = getSpreadsheet();
@@ -36,26 +36,8 @@ const syncToLookerStudio = (sourceSheetName) => {
     return;
   }
 
-  const range = sourceSheet.getRange(1, 1, lastRow, lastCol);
-  const data = range.getValues();
-  const displayData = range.getDisplayValues();
-
-  // 日付オブジェクトに変換されてしまう列を表示値で置換
-  const headers = data[0];
-  const dateSafeCols = [];
-  headers.forEach((h, i) => {
-    if (h === 'upload_month' || h === 'upload_date') {
-      dateSafeCols.push(i);
-    }
-  });
-
-  if (dateSafeCols.length > 0) {
-    for (let r = 1; r < data.length; r++) {
-      for (const c of dateSafeCols) {
-        data[r][c] = displayData[r][c];
-      }
-    }
-  }
+  // 表示値（文字列）として取得して日付変換を完全に防止
+  const data = sourceSheet.getRange(1, 1, lastRow, lastCol).getDisplayValues();
 
   const destSs = SpreadsheetApp.openById(destId);
   let destSheet = destSs.getSheetByName(destSheetName);
@@ -65,6 +47,9 @@ const syncToLookerStudio = (sourceSheetName) => {
   }
 
   destSheet.clearContents();
+
+  // 書き込み先を書式なしテキストに設定してから書き込む
+  destSheet.getRange(1, 1, data.length, data[0].length).setNumberFormat('@');
   destSheet.getRange(1, 1, data.length, data[0].length).setValues(data);
 
   Logger.log(`[SYNC OK] Synced ${lastRow} rows from "${effectiveSource}" to Looker Studio spreadsheet.`);
