@@ -173,12 +173,11 @@ const checkAndArchive = () => {
  * 期間文字列 "YYYY-MM-DD_YYYY-MM-DD" を "M/D-M/D" 形式に変換する。
  */
 const formatPeriodName = (periodStr) => {
-  if (!periodStr) return 'unknown';
   const [sinceStr, untilStr] = periodStr.split('_');
   const formatDate = (dateStr) => {
     if (!dateStr) return '?';
     const d = new Date(dateStr);
-    return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
+    return `${d.getMonth() + 1}/${d.getDate()}`;
   };
   return `${formatDate(untilStr)}-${formatDate(sinceStr)}`;
 };

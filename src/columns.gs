@@ -104,7 +104,7 @@ const addExtractColumn = (propertyKey, headerName, sheetName = 'data') => {
 };
 
 /**
- * uploadedAtFormatted 列から月を抽出して「X月」形式の列を追加する。
+ * uploadedAtFormatted 列から年月を抽出して「YYYY年X月」形式の列を追加する。
  */
 const addUploadMonthColumn = (sheetName = 'data') => {
   const sheet = getSheet(sheetName);
@@ -132,7 +132,7 @@ const addUploadMonthColumn = (sheetName = 'data') => {
 
   const formulas = [];
   for (let row = 2; row <= lastRow; row++) {
-    formulas.push([`=IFERROR(REGEXEXTRACT(${dateColLetter}${row},"-(\\\d{2})-")*1&"月","")`]);
+    formulas.push([`=IFERROR(REGEXEXTRACT(${dateColLetter}${row},"(\\\d{4})")&"年"&REGEXEXTRACT(${dateColLetter}${row},"-(\\\d{2})-")*1&"月","")`]);
   }
 
   sheet.getRange(2, formulaColIndex + 1, formulas.length, 1).setFormulas(formulas);
