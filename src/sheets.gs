@@ -177,7 +177,7 @@ const formatPeriodName = (periodStr) => {
   const formatDate = (dateStr) => {
     if (!dateStr) return '?';
     const d = new Date(dateStr);
-    return `${d.getMonth() + 1}/${d.getDate()}`;
+    return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
   };
   return `${formatDate(untilStr)}-${formatDate(sinceStr)}`;
 };
