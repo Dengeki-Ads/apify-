@@ -36,7 +36,26 @@ const syncToLookerStudio = (sourceSheetName) => {
     return;
   }
 
-  const data = sourceSheet.getRange(1, 1, lastRow, lastCol).getValues();
+  const range = sourceSheet.getRange(1, 1, lastRow, lastCol);
+  const data = range.getValues();
+  const displayData = range.getDisplayValues();
+
+  // 日付オブジェクトに変換されてしまう列を表示値で置換
+  const headers = data[0];
+  const dateSafeCols = [];
+  headers.forEach((h, i) => {
+    if (h === 'upload_month' || h === 'upload_date') {
+      dateSafeCols.push(i);
+    }
+  });
+
+  if (dateSafeCols.length > 0) {
+    for (let r = 1; r < data.length; r++) {
+      for (const c of dateSafeCols) {
+        data[r][c] = displayData[r][c];
+      }
+    }
+  }
 
   const destSs = SpreadsheetApp.openById(destId);
   let destSheet = destSs.getSheetByName(destSheetName);
