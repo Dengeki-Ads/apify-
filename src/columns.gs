@@ -194,6 +194,16 @@ const applySheetTransformations = (sheetName) => {
 };
 
 /**
+ * 統合シートにupload_monthとupload_dateを追加する。手動で1回実行する想定。
+ */
+function addDateColumnsToConsolidated() {
+  const sheetName = getConsolidatedSheetName();
+  addUploadMonthColumn(sheetName);
+  addUploadDateColumn(sheetName);
+  Logger.log(`[MANUAL OK] Added upload_month and upload_date to "${sheetName}".`);
+}
+
+/**
  * 列番号（1-indexed）をアルファベット列名に変換する。
  */
 const columnToLetter = (col) => {
