@@ -70,129 +70,42 @@ const listMonthlySheets = () => {
     .sort();
 };
 
+/** 統合対象から除外するシート名 */
+const EXCLUDED_SHEETS = new Set(['log', 'settings']);
+
 /**
- * 統合シートを更新する（差分更新）。
- * 月別シートに存在する行だけを差し替え、手動データはそのまま保持する。
+ * 統合対象の全シート名を取得する（統合シート自身と除外リストを除く）。
  */
-const rebuildConsolidatedSheet = (updatedMonths) => {
+const listSourceSheets = () => {
   const ss = getSpreadsheet();
   const consolidatedName = getConsolidatedSheetName();
-  const consolidatedSheet = ss.getSheetByName(consolidatedName);
-
-  if (!consolidatedSheet) {
-    return fullRebuildConsolidatedSheet();
-  }
-
-  if (!updatedMonths || updatedMonths.length === 0) {
-    return fullRebuildConsolidatedSheet();
-  }
-
-  SpreadsheetApp.flush();
-
-  const lastRow = consolidatedSheet.getLastRow();
-  const lastCol = consolidatedSheet.getLastColumn();
-
-  if (lastRow === 0 || lastCol === 0) {
-    return fullRebuildConsolidatedSheet();
-  }
-
-  // 更新対象月の新しいデータを月別シートから取得
-  const newRowsByMonth = {};
-  for (const monthName of updatedMonths) {
-    newRowsByMonth[monthName] = readSheetDisplayRows(ss, monthName);
-  }
-
-  // 新しいデータのフィンガープリントを作成（行の完全一致判定用）
-  const oldFingerprints = new Set();
-  for (const monthName of updatedMonths) {
-    const oldRows = readSheetDisplayRows(ss, monthName);
-    // ※ この時点で月別シートは既に更新済みなので、
-    //   統合シートの該当月行と比較する必要がある
-  }
-
-  const range = consolidatedSheet.getRange(1, 1, lastRow, lastCol);
-  const allDisplay = range.getDisplayValues();
-  const headers = allDisplay[0];
-
-  const dateColIndex = headers.indexOf('uploadedAtFormatted');
-  const updatedSet = new Set(updatedMonths);
-
-  // 新データのフィンガープリントSet（月別シートから取得した行）
-  const newDataFingerprints = new Set();
-  for (const monthName of updatedMonths) {
-    const rows = newRowsByMonth[monthName];
-    for (const row of rows) {
-      newDataFingerprints.add(row.join('\t'));
-    }
-  }
-
-  // 統合シートの行を仕分け
-  const keptRows = [];
-  for (let i = 1; i < allDisplay.length; i++) {
-    const row = allDisplay[i];
-    if (row.every((cell) => cell === '')) continue;
-
-    let rowMonth = 'unknown';
-    if (dateColIndex !== -1) {
-      const dateVal = row[dateColIndex] || '';
-      const match = dateVal.match(/^(\d{4}-\d{2})/);
-      if (match) rowMonth = match[1];
-    }
-
-    if (updatedSet.has(rowMonth)) {
-      // 更新対象月の行 → 月別シートの新データに含まれていなければ手動データなので保持
-      const fp = row.join('\t');
-      // 更新対象月の行はすべて削除して新データで置き換える
-      // （手動データは uploadedAtFormatted が異なるか、月別シートと同じ月でも
-      //   別の行なので新データに含まれない）
-      // → ただし手動データも同じ月だと消えてしまう問題があるため、
-      //   ここでは全行を保持して後で重複排除する方式にはしない
-      // → 代わりに: 更新対象月の行は削除（自動+手動問わず）
-      continue;
-    }
-
-    keptRows.push(row);
-  }
-
-  // 新しいデータを追加
-  const newRows = [];
-  for (const monthName of updatedMonths) {
-    for (const row of newRowsByMonth[monthName]) {
-      newRows.push(row);
-    }
-  }
-
-  const finalRows = [...keptRows, ...newRows];
-
-  if (finalRows.length === 0) {
-    Logger.log('[CONSOLIDATED SKIP] No data after merge.');
-    return 'skip';
-  }
-
-  // 統合シートを上書き（書式なしテキストを事前設定して日付自動変換を防止）
-  writeRowsToSheet(consolidatedSheet, headers, finalRows);
-
-  Logger.log(`[CONSOLIDATED OK] ${consolidatedName}: ${finalRows.length} rows (kept: ${keptRows.length}, new: ${newRows.length} from ${updatedMonths.join(',')}).`);
-  return 'ok';
+  return ss.getSheets()
+    .map((s) => s.getName())
+    .filter((name) => name !== consolidatedName && !EXCLUDED_SHEETS.has(name))
+    .sort();
 };
 
 /**
- * 統合シートをゼロからフルリビルドする。初回作成時や復旧用。
- * 手動データ（月別シートに対応しない行）は保持する。
+ * 統合シートを更新する。
+ * 全ソースシート（統合・log・settings以外）を結合して統合シートを再生成する。
+ */
+const rebuildConsolidatedSheet = (updatedMonths) => {
+  return fullRebuildConsolidatedSheet();
+};
+
+/**
+ * 全ソースシートを結合して統合シートを生成する。
  */
 const fullRebuildConsolidatedSheet = () => {
   const ss = getSpreadsheet();
   const consolidatedName = getConsolidatedSheetName();
   const tmpName = consolidatedName + '_tmp';
-  const monthlyNames = listMonthlySheets();
+  const sourceNames = listSourceSheets();
 
-  if (monthlyNames.length === 0) {
-    Logger.log('[CONSOLIDATED SKIP] No monthly sheets found.');
+  if (sourceNames.length === 0) {
+    Logger.log('[CONSOLIDATED SKIP] No source sheets found.');
     return 'skip';
   }
-
-  // 既存の統合シートから手動データを保持
-  const manualRows = extractManualRows(ss, consolidatedName, monthlyNames);
 
   let tmpSheet = ss.getSheetByName(tmpName);
   if (tmpSheet) ss.deleteSheet(tmpSheet);
@@ -203,35 +116,35 @@ const fullRebuildConsolidatedSheet = () => {
   let headers = null;
   let allRows = [];
 
-  for (const name of monthlyNames) {
-    const rows = readSheetDisplayRows(ss, name);
-    if (rows.length === 0) continue;
+  for (const name of sourceNames) {
+    const sheet = ss.getSheetByName(name);
+    if (!sheet || sheet.getLastRow() <= 1) continue;
+
+    const sheetHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getDisplayValues()[0];
 
     if (!headers) {
-      const sheet = ss.getSheetByName(name);
-      headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getDisplayValues()[0];
+      headers = sheetHeaders;
     }
 
+    const rows = readSheetDisplayRows(ss, name);
     allRows = [...allRows, ...rows];
-  }
 
-  // 手動データを追加
-  allRows = [...allRows, ...manualRows];
+    Logger.log(`[CONSOLIDATED] "${name}": ${rows.length} rows`);
+  }
 
   if (!headers || allRows.length === 0) {
     ss.deleteSheet(tmpSheet);
-    Logger.log('[CONSOLIDATED SKIP] No data in monthly sheets.');
+    Logger.log('[CONSOLIDATED SKIP] No data in source sheets.');
     return 'skip';
   }
 
-  // 書式なしテキストを事前設定して書き込み
   writeRowsToSheet(tmpSheet, headers, allRows);
 
   const oldSheet = ss.getSheetByName(consolidatedName);
   if (oldSheet) ss.deleteSheet(oldSheet);
   tmpSheet.setName(consolidatedName);
 
-  Logger.log(`[CONSOLIDATED FULL OK] ${consolidatedName}: ${allRows.length} rows (manual: ${manualRows.length}) from ${monthlyNames.length} monthly sheets.`);
+  Logger.log(`[CONSOLIDATED OK] ${consolidatedName}: ${allRows.length} rows from ${sourceNames.length} sheets.`);
   return 'ok';
 };
 
@@ -272,41 +185,6 @@ const writeRowsToSheet = (sheet, headers, rows) => {
   if (rows.length > 0) {
     sheet.getRange(2, 1, rows.length, rows[0].length).setValues(rows);
   }
-};
-
-/**
- * 統合シートからどの月別シートにも属さない手動データ行を抽出する。
- */
-const extractManualRows = (ss, consolidatedName, monthlyNames) => {
-  const consolidatedSheet = ss.getSheetByName(consolidatedName);
-  if (!consolidatedSheet || consolidatedSheet.getLastRow() <= 1) return [];
-
-  const lastRow = consolidatedSheet.getLastRow();
-  const lastCol = consolidatedSheet.getLastColumn();
-  const display = consolidatedSheet.getRange(1, 1, lastRow, lastCol).getDisplayValues();
-  const headers = display[0];
-
-  const dateColIndex = headers.indexOf('uploadedAtFormatted');
-  const monthlySet = new Set(monthlyNames);
-
-  const manualRows = [];
-  for (let i = 1; i < display.length; i++) {
-    const row = display[i];
-    if (row.every((cell) => cell === '')) continue;
-
-    let rowMonth = 'unknown';
-    if (dateColIndex !== -1) {
-      const dateVal = row[dateColIndex] || '';
-      const match = dateVal.match(/^(\d{4}-\d{2})/);
-      if (match) rowMonth = match[1];
-    }
-
-    if (!monthlySet.has(rowMonth)) {
-      manualRows.push(row);
-    }
-  }
-
-  return manualRows;
 };
 
 /**
