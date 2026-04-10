@@ -82,7 +82,7 @@ const startApifyTask = (period) => {
       requestUrl: webhookUrl,
     }];
     const webhooksParam = Utilities.base64Encode(JSON.stringify(webhooks));
-    const url = `${buildTaskRunUrl()}&webhooks=${encodeURIComponent(webhooksParam)}`;
+    const url = `${buildActorRunUrl()}&webhooks=${encodeURIComponent(webhooksParam)}`;
 
     // 直近の実行済みRunからstartUrlsを取得して反映
     const lastRunInput = fetchLastRunInput();
@@ -165,7 +165,7 @@ function runWithCustomUrls() {
     requestUrl: webhookUrl,
   }];
   const webhooksParam = Utilities.base64Encode(JSON.stringify(webhooks));
-  const url = `${buildTaskRunUrl()}&webhooks=${encodeURIComponent(webhooksParam)}`;
+  const url = `${buildActorRunUrl()}&webhooks=${encodeURIComponent(webhooksParam)}`;
 
   const response = UrlFetchApp.fetch(url, {
     method: 'post',

@@ -26,12 +26,12 @@ const getSpreadsheet = () => {
 };
 
 /**
- * Apify Task起動URLを組み立てる。
+ * Apify Actor起動URLを組み立てる。
  */
-const buildTaskRunUrl = () => {
+const buildActorRunUrl = () => {
   const apiKey = getConfig('APIFY_API_KEY');
-  const taskId = getConfig('APIFY_TASK_ID');
-  return `https://api.apify.com/v2/actor-tasks/${taskId}/runs?token=${apiKey}`;
+  const actorId = getConfig('APIFY_ACTOR_ID');
+  return `https://api.apify.com/v2/acts/${actorId}/runs?token=${apiKey}`;
 };
 
 /**
@@ -43,27 +43,13 @@ const buildDatasetUrl = (datasetId) => {
 };
 
 /**
- * Apify Task APIから現在のタスク入力設定を取得する。
- */
-const fetchTaskInput = () => {
-  const apiKey = getConfig('APIFY_API_KEY');
-  const taskId = getConfig('APIFY_TASK_ID');
-  const url = `https://api.apify.com/v2/actor-tasks/${taskId}?token=${apiKey}`;
-  const response = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
-  if (response.getResponseCode() !== 200) {
-    throw new Error(`Failed to fetch task input (HTTP ${response.getResponseCode()})`);
-  }
-  return JSON.parse(response.getContentText()).data.input;
-};
-
-/**
- * Apify Taskの直近の実行済みRunからinputを取得する。
+ * Apify Actorの直近の実行済みRunからinputを取得する。
  * status=SUCCEEDEDの最新Runを対象とする。
  */
 const fetchLastRunInput = () => {
   const apiKey = getConfig('APIFY_API_KEY');
-  const taskId = getConfig('APIFY_TASK_ID');
-  const url = `https://api.apify.com/v2/actor-tasks/${taskId}/runs/last?token=${apiKey}&status=SUCCEEDED`;
+  const actorId = getConfig('APIFY_ACTOR_ID');
+  const url = `https://api.apify.com/v2/acts/${actorId}/runs/last?token=${apiKey}&status=SUCCEEDED`;
   const response = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
   if (response.getResponseCode() !== 200) {
     throw new Error(`Failed to fetch last run (HTTP ${response.getResponseCode()})`);
@@ -78,45 +64,31 @@ const fetchLastRunInput = () => {
 };
 
 /**
- * Apifyタスクの期間文字列を返す（"since_until" 形式）。
- */
-const fetchTaskPeriod = () => {
-  const input = fetchTaskInput();
-  const since = input.since || '';
-  const until = input.until || '';
-  return `${since}_${until}`;
-};
-
-/**
- * Apify Taskの現在の取得期間をログに表示する。手動実行用。
+ * Apify Actorの直近Runの情報をログに表示する。手動実行用。
  */
 function checkPeriod() {
-  // Task保存済み設定
-  const input = fetchTaskInput();
-  Logger.log('[Task設定] since: ' + input.since + ', until: ' + input.until);
-  Logger.log('[Task設定] maxItems: ' + input.maxItems);
-  Logger.log('[Task設定] startUrls数: ' + (input.startUrls ? input.startUrls.length : 'なし'));
-  Logger.log('[Task設定] 全体: ' + JSON.stringify(input, null, 2));
+  const apiKey = getConfig('APIFY_API_KEY');
+  const actorId = getConfig('APIFY_ACTOR_ID');
 
   // 直近のRunで実際に使われた入力
-  const apiKey = getConfig('APIFY_API_KEY');
-  const taskId = getConfig('APIFY_TASK_ID');
-  const url = `https://api.apify.com/v2/actor-tasks/${taskId}/runs/last?token=${apiKey}`;
+  const url = `https://api.apify.com/v2/acts/${actorId}/runs/last?token=${apiKey}`;
   const response = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
   if (response.getResponseCode() === 200) {
     const run = JSON.parse(response.getContentText()).data;
     Logger.log('[最終Run] ID: ' + run.id + ', status: ' + run.status);
     Logger.log('[最終Run] startedAt: ' + run.startedAt);
     Logger.log('[最終Run] datasetId: ' + run.defaultDatasetId);
-    Logger.log('[最終Run] itemCount: ' + (run.stats && run.stats.inputItemCount));
     // Runの入力を取得
     const inputUrl = `https://api.apify.com/v2/key-value-stores/${run.defaultKeyValueStoreId}/records/INPUT?token=${apiKey}`;
     const inputRes = UrlFetchApp.fetch(inputUrl, { muteHttpExceptions: true });
     if (inputRes.getResponseCode() === 200) {
       const runInput = JSON.parse(inputRes.getContentText());
       Logger.log('[最終Run入力] since: ' + runInput.since + ', until: ' + runInput.until);
+      Logger.log('[最終Run入力] startUrls数: ' + (runInput.startUrls ? runInput.startUrls.length : 'なし'));
       Logger.log('[最終Run入力] 全体: ' + JSON.stringify(runInput, null, 2));
     }
+  } else {
+    Logger.log('[ERROR] 直近のRunが見つかりません (HTTP ' + response.getResponseCode() + ')');
   }
 }
 
