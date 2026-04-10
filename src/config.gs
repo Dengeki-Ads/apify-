@@ -57,6 +57,27 @@ const fetchTaskInput = () => {
 };
 
 /**
+ * Apify Taskの直近の実行済みRunからinputを取得する。
+ * status=SUCCEEDEDの最新Runを対象とする。
+ */
+const fetchLastRunInput = () => {
+  const apiKey = getConfig('APIFY_API_KEY');
+  const taskId = getConfig('APIFY_TASK_ID');
+  const url = `https://api.apify.com/v2/actor-tasks/${taskId}/runs/last?token=${apiKey}&status=SUCCEEDED`;
+  const response = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+  if (response.getResponseCode() !== 200) {
+    throw new Error(`Failed to fetch last run (HTTP ${response.getResponseCode()})`);
+  }
+  const run = JSON.parse(response.getContentText()).data;
+  const inputUrl = `https://api.apify.com/v2/key-value-stores/${run.defaultKeyValueStoreId}/records/INPUT?token=${apiKey}`;
+  const inputRes = UrlFetchApp.fetch(inputUrl, { muteHttpExceptions: true });
+  if (inputRes.getResponseCode() !== 200) {
+    throw new Error(`Failed to fetch last run input (HTTP ${inputRes.getResponseCode()})`);
+  }
+  return JSON.parse(inputRes.getContentText());
+};
+
+/**
  * Apifyタスクの期間文字列を返す（"since_until" 形式）。
  */
 const fetchTaskPeriod = () => {

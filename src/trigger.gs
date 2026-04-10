@@ -84,9 +84,9 @@ const startApifyTask = (period) => {
     const webhooksParam = Utilities.base64Encode(JSON.stringify(webhooks));
     const url = `${buildTaskRunUrl()}&webhooks=${encodeURIComponent(webhooksParam)}`;
 
-    // Apifyコンソールの最新タスク設定からstartUrlsを取得して反映
-    const taskInput = fetchTaskInput();
-    const startUrls = taskInput.startUrls || [];
+    // 直近の実行済みRunからstartUrlsを取得して反映
+    const lastRunInput = fetchLastRunInput();
+    const startUrls = lastRunInput.startUrls || [];
 
     const response = UrlFetchApp.fetch(url, {
       method: 'post',
