@@ -183,7 +183,13 @@ const writeRowsToSheet = (sheet, headers, rows) => {
   // ヘッダーとデータを書き込み
   sheet.getRange(1, 1, 1, totalCols).setValues([headers]);
   if (rows.length > 0) {
-    sheet.getRange(2, 1, rows.length, rows[0].length).setValues(rows);
+    // 列数をヘッダーに合わせて揃える
+    const normalized = rows.map((row) => {
+      if (row.length === totalCols) return row;
+      if (row.length > totalCols) return row.slice(0, totalCols);
+      return [...row, ...Array(totalCols - row.length).fill('')];
+    });
+    sheet.getRange(2, 1, normalized.length, totalCols).setValues(normalized);
   }
 };
 

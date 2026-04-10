@@ -25,6 +25,7 @@ const determineTargetPeriods = (baseDate) => {
 
 /**
  * 基準日からoffsetMonth分ずらした月の期間を生成する。
+ * 月初（1日）〜月末（最終日）の範囲を返す。
  * Apifyの仕様: since=期間終了日, until=期間開始日
  */
 const buildMonthPeriod = (baseDate, offsetMonth) => {
@@ -33,10 +34,10 @@ const buildMonthPeriod = (baseDate, offsetMonth) => {
   const month = baseDate.getMonth() + offsetMonth;
 
   const firstOfMonth = new Date(year, month, 1);
-  const firstOfNextMonth = new Date(year, month + 1, 1);
+  const lastOfMonth = new Date(year, month + 1, 0); // 月末日
 
   const until = Utilities.formatDate(firstOfMonth, tz, 'yyyy-MM-dd');
-  const since = Utilities.formatDate(firstOfNextMonth, tz, 'yyyy-MM-dd');
+  const since = Utilities.formatDate(lastOfMonth, tz, 'yyyy-MM-dd');
   const monthLabel = Utilities.formatDate(firstOfMonth, tz, 'yyyy-MM');
 
   return { since, until, month: monthLabel };
@@ -83,12 +84,17 @@ const startApifyTask = (period) => {
     const webhooksParam = Utilities.base64Encode(JSON.stringify(webhooks));
     const url = `${buildTaskRunUrl()}&webhooks=${encodeURIComponent(webhooksParam)}`;
 
+    // Apifyコンソールの最新タスク設定からstartUrlsを取得して反映
+    const taskInput = fetchTaskInput();
+    const startUrls = taskInput.startUrls || [];
+
     const response = UrlFetchApp.fetch(url, {
       method: 'post',
       contentType: 'application/json',
       payload: JSON.stringify({
         since: period.since,
         until: period.until,
+        startUrls: startUrls,
       }),
       muteHttpExceptions: true,
     });
@@ -110,7 +116,7 @@ const startApifyTask = (period) => {
       status: '実行中',
     });
 
-    PropertiesService.getScriptProperties().setProperty('CURRENT_PERIOD', `${period.since}_${period.until}`);
+    PropertiesService.getScriptProperties().setProperty('CURRENT_PERIOD', `${period.until}_${period.since}`);
 
     Logger.log(`Actor run started. RunID: ${runId}, month: ${period.month}, period: ${period.until} - ${period.since}`);
 
