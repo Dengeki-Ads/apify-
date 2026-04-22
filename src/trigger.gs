@@ -82,19 +82,15 @@ const startApifyTask = (period) => {
       requestUrl: webhookUrl,
     }];
     const webhooksParam = Utilities.base64Encode(JSON.stringify(webhooks));
-    const url = `${buildActorRunUrl()}&webhooks=${encodeURIComponent(webhooksParam)}`;
+    const url = `${buildTaskRunUrl()}&webhooks=${encodeURIComponent(webhooksParam)}`;
 
-    // 直近の実行済みRunからstartUrlsを取得して反映
-    const lastRunInput = fetchLastRunInput();
-    const startUrls = lastRunInput.startUrls || [];
-
+    // startUrlsはTaskに保存済みのものが使われる。期間だけ上書き送信。
     const response = UrlFetchApp.fetch(url, {
       method: 'post',
       contentType: 'application/json',
       payload: JSON.stringify({
         since: period.since,
         until: period.until,
-        startUrls: startUrls,
       }),
       muteHttpExceptions: true,
     });
