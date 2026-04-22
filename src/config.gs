@@ -26,15 +26,6 @@ const getSpreadsheet = () => {
 };
 
 /**
- * Apify Actor起動URLを組み立てる。
- */
-const buildActorRunUrl = () => {
-  const apiKey = getConfig('APIFY_API_KEY');
-  const actorId = getConfig('APIFY_ACTOR_ID');
-  return `https://api.apify.com/v2/acts/${actorId}/runs?token=${apiKey}`;
-};
-
-/**
  * Apify Task起動URLを組み立てる。
  * Taskに保存済みのInput（startUrls等）をベースに、payloadで指定した項目だけ上書きして実行される。
  */
