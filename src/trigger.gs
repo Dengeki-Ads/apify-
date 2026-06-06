@@ -3,27 +3,6 @@
  */
 
 /**
- * 実行日から対象期間リストを返す。
- * 当月は毎日、先月は21日のみ。
- */
-const determineTargetPeriods = (baseDate) => {
-  const periods = [];
-  const tz = 'Asia/Tokyo';
-  const now = new Date(baseDate);
-
-  // 当月
-  periods.push(buildMonthPeriod(now, 0));
-
-  // 毎月21日は先月も対象
-  const day = parseInt(Utilities.formatDate(now, tz, 'dd'), 10);
-  if (day === 21) {
-    periods.push(buildMonthPeriod(now, -1));
-  }
-
-  return periods;
-};
-
-/**
  * 基準日からoffsetMonth分ずらした月の期間を生成する。
  * 月初（1日）〜月末（最終日）の範囲を返す。
  * Apifyの仕様: since=期間終了日, until=期間開始日
@@ -44,23 +23,22 @@ const buildMonthPeriod = (baseDate, offsetMonth) => {
 };
 
 /**
- * 月ラベルからシート名を返す。
- */
-const getMonthSheetName = (monthLabel) => {
-  return monthLabel;
-};
-
-/**
- * メイン関数。定時トリガーまたは手動で実行する。
- * 対象月ごとにApify Taskを起動する。
+ * 当月+先月の2つの Apify Task を起動。
+ * 8時と21時のトリガー、及び手動実行用。
  */
 function runDailyJob() {
   const baseDate = new Date();
-  const periods = determineTargetPeriods(baseDate);
+  startApifyTask(buildMonthPeriod(baseDate, 0));   // 当月
+  startApifyTask(buildMonthPeriod(baseDate, -1));  // 先月
+}
 
-  periods.forEach((period) => {
-    startApifyTask(period);
-  });
+/**
+ * 当月のみの Apify Task を起動。
+ * 14時のトリガー用。
+ */
+function runDailyJobCurrentOnly() {
+  const baseDate = new Date();
+  startApifyTask(buildMonthPeriod(baseDate, 0));   // 当月
 }
 
 /**
@@ -104,34 +82,10 @@ const startApifyTask = (period) => {
 
     runId = body.data.id;
 
-    appendLogRow({
-      triggered_at: new Date(),
-      run_id: runId,
-      target_period: `${period.until} ~ ${period.since}`,
-      target_month: period.month,
-      status: '実行中',
-    });
-
-    PropertiesService.getScriptProperties().setProperty('CURRENT_PERIOD', `${period.until}_${period.since}`);
-
     Logger.log(`Actor run started. RunID: ${runId}, month: ${period.month}, period: ${period.until} - ${period.since}`);
 
   } catch (e) {
-    Logger.log(`startApifyTask failed: ${e.message}`);
-
-    appendLogRow({
-      triggered_at: new Date(),
-      run_id: runId || '',
-      target_period: `${period.until} ~ ${period.since}`,
-      target_month: period.month,
-      status: '失敗',
-      error_detail: e.message,
-    });
-
-    sendErrorNotification(
-      'TikTok Scraper: Actor起動失敗',
-      `startApifyTask() でエラーが発生しました。\nMonth: ${period.month}\n\n${e.message}`
-    );
+    Logger.log(`startApifyTask failed: month=${period.month}, error=${e.message}`);
   }
 };
 
@@ -139,28 +93,39 @@ const startApifyTask = (period) => {
  * 毎日のタイマートリガーを作成する。手動で1回実行。
  */
 function setupDailyTrigger() {
-  const hour = parseInt(getConfig('TRIGGER_HOUR'), 10);
-
+  // 既存トリガーを全削除
   ScriptApp.getProjectTriggers()
-    .filter((t) => t.getHandlerFunction() === 'runDailyJob')
+    .filter((t) => t.getHandlerFunction() === 'runDailyJob' || t.getHandlerFunction() === 'runDailyJobCurrentOnly')
     .forEach((t) => ScriptApp.deleteTrigger(t));
 
+  // 8時: 両方
   ScriptApp.newTrigger('runDailyJob')
     .timeBased()
     .everyDays(1)
-    .atHour(hour)
+    .atHour(8)
+    .create();
+  // 14時: 当月のみ
+  ScriptApp.newTrigger('runDailyJobCurrentOnly')
+    .timeBased()
+    .everyDays(1)
+    .atHour(14)
+    .create();
+  // 21時: 両方
+  ScriptApp.newTrigger('runDailyJob')
+    .timeBased()
+    .everyDays(1)
+    .atHour(21)
     .create();
 
-  Logger.log(`Daily trigger created for runDailyJob at ${hour}:00-${hour + 1}:00.`);
+  Logger.log('Daily triggers created: runDailyJob@8h, runDailyJobCurrentOnly@14h, runDailyJob@21h.');
 }
 
 /**
- * runDailyJobのトリガーを削除する。
+ * runDailyJob/runDailyJobCurrentOnlyのトリガーを削除する。
  */
 function deleteDailyTrigger() {
   const triggers = ScriptApp.getProjectTriggers()
-    .filter((t) => t.getHandlerFunction() === 'runDailyJob');
-
+    .filter((t) => t.getHandlerFunction() === 'runDailyJob' || t.getHandlerFunction() === 'runDailyJobCurrentOnly');
   triggers.forEach((t) => ScriptApp.deleteTrigger(t));
-  Logger.log(`Deleted ${triggers.length} trigger(s) for runDailyJob.`);
+  Logger.log(`Deleted ${triggers.length} trigger(s) for runDailyJob/runDailyJobCurrentOnly.`);
 }

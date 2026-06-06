@@ -4,6 +4,8 @@
 
 /**
  * Apify Webhook POST受信エントリポイント。
+ * シート操作は行わず、Apifyからのデータ取得とraw保存のみを担当。
+ * その後のシート整形・書込・統合・Looker同期は processSheetData (別実行) に委譲する。
  */
 function doPost(e) {
   try {
@@ -19,16 +21,8 @@ function doPost(e) {
     const datasetId = payload.resource.defaultDatasetId;
 
     if (runStatus !== 'SUCCEEDED') {
-      updateLogRow(runId, {
-        completed_at: new Date(),
-        status: '失敗',
-        error_detail: `Actor run status: ${runStatus}`,
-      });
-      sendErrorNotification(
-        'TikTok Scraper: Actor実行失敗',
-        `RunID: ${runId}\nStatus: ${runStatus}`
-      );
-      return ContentService.createTextOutput('ERROR').setMimeType(ContentService.MimeType.TEXT);
+      Logger.log(`[DOPOST] Actor run not succeeded. RunID: ${runId}, Status: ${runStatus}`);
+      return ContentService.createTextOutput('OK').setMimeType(ContentService.MimeType.TEXT);
     }
 
     const url = buildDatasetUrl(datasetId);
@@ -36,18 +30,15 @@ function doPost(e) {
     const statusCode = response.getResponseCode();
 
     if (statusCode !== 200) {
-      const errMsg = `Dataset fetch failed (HTTP ${statusCode}): ${response.getContentText()}`;
-      updateLogRow(runId, { completed_at: new Date(), status: '失敗', error_detail: errMsg });
-      sendErrorNotification('TikTok Scraper: データ取得失敗', errMsg);
-      return ContentService.createTextOutput('ERROR').setMimeType(ContentService.MimeType.TEXT);
+      Logger.log(`[DOPOST] Dataset fetch failed (HTTP ${statusCode}): ${response.getContentText()}`);
+      return ContentService.createTextOutput('OK').setMimeType(ContentService.MimeType.TEXT);
     }
 
     const items = JSON.parse(response.getContentText());
 
     if (!items || items.length === 0) {
-      updateLogRow(runId, { completed_at: new Date(), status: '失敗', error_detail: 'Dataset is empty' });
-      sendErrorNotification('TikTok Scraper: データ取得失敗', `RunID: ${runId}\nDataset is empty.`);
-      return ContentService.createTextOutput('ERROR').setMimeType(ContentService.MimeType.TEXT);
+      Logger.log(`[DOPOST] Dataset is empty. RunID: ${runId}`);
+      return ContentService.createTextOutput('OK').setMimeType(ContentService.MimeType.TEXT);
     }
 
     const fetchedAt = new Date();
@@ -75,7 +66,8 @@ function doPost(e) {
       return row;
     });
 
-    // raw原本を別スプレッドシートに保存（加工前）
+    // raw原本を別スプレッドシートに保存（メインスプレッドシートではなく Drive 上の別ファイル）
+    // 後続の processSheetData はこのファイルから読み戻す
     let rawInfo = null;
     try {
       rawInfo = saveRawSpreadsheet(headers, rows, {
@@ -87,73 +79,31 @@ function doPost(e) {
       Logger.log(`[RAW ERROR] ${rawErr.message}`);
     }
 
-    // 月別シートに振り分けて書き込み
-    const grouped = groupRowsByMonth(headers, rows, dataKeys);
-    const updatedMonths = [];
-
-    for (const [monthName, monthData] of Object.entries(grouped)) {
-      overwriteMonthlySheet(monthName, headers, monthData.rows);
-      applySheetTransformations(monthName);
-      updatedMonths.push(monthName);
+    if (!rawInfo) {
+      Logger.log(`[DOPOST] Failed to save raw spreadsheet. RunID: ${runId}`);
+      return ContentService.createTextOutput('ERROR').setMimeType(ContentService.MimeType.TEXT);
     }
 
-    // 統合シート再生成
-    let consolidatedStatus = 'skip';
-    try {
-      consolidatedStatus = rebuildConsolidatedSheet(updatedMonths);
-    } catch (consErr) {
-      Logger.log(`[CONSOLIDATED ERROR] ${consErr.message}`);
-      consolidatedStatus = 'error';
-    }
-
-    // Looker Studio同期（統合シートから）
-    syncToLookerStudio();
-
-    updateLogRow(runId, {
-      completed_at: new Date(),
-      status: '完了',
-      result_count: rows.length,
-      target_month: updatedMonths.join(','),
-      raw_file_id: rawInfo ? rawInfo.fileId : '',
-      raw_file_url: rawInfo ? rawInfo.fileUrl : '',
-      consolidated_status: consolidatedStatus,
+    // 月別振り分け・整形・書込・統合・Looker同期は processSheetData に委譲
+    enqueueJob({
+      type: 'process_data',
+      runId,
+      datasetId,
+      fetchedAt: fetchedAt.toISOString(),
+      rawFileId: rawInfo.fileId,
+      rawFileUrl: rawInfo.fileUrl,
+      resultCount: rows.length,
     });
+    scheduleProcessSheetData();
 
-    Logger.log(`Webhook processed. RunID: ${runId}, Items: ${rows.length}, Months: ${updatedMonths.join(',')}`);
+    Logger.log(`Webhook accepted. RunID: ${runId}, Items: ${rows.length}, Raw: ${rawInfo.fileId}`);
     return ContentService.createTextOutput('OK').setMimeType(ContentService.MimeType.TEXT);
 
   } catch (err) {
     Logger.log(`doPost error: ${err.message}\n${err.stack}`);
-
-    try {
-      sendErrorNotification(
-        'TikTok Scraper: Webhook処理エラー',
-        `Error: ${err.message}\n\nStack: ${err.stack}`
-      );
-    } catch (mailErr) {
-      Logger.log(`Failed to send error notification: ${mailErr.message}`);
-    }
-
     return ContentService.createTextOutput('ERROR').setMimeType(ContentService.MimeType.TEXT);
   }
 }
-
-/**
- * ヘルスチェック用GETエンドポイント。
- */
-function doGet(e) {
-  return ContentService.createTextOutput('TikTok Scraper Webhook is active.')
-    .setMimeType(ContentService.MimeType.TEXT);
-}
-
-/**
- * エラー通知メールを送信する。
- */
-const sendErrorNotification = (subject, body) => {
-  const email = getConfig('NOTIFY_EMAIL');
-  GmailApp.sendEmail(email, subject, body);
-  Logger.log(`Error notification sent to ${email}`);
-};
 
 /**
  * データ行を月別にグルーピングする。

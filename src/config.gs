@@ -74,10 +74,11 @@ function checkPeriod() {
 
 /**
  * COLUMNS_TO_KEEP をパースし、常に保持する列を付与して返す。
+ * リスト系プロパティは | 区切りで保存される運用。
  */
 const getColumnsToKeep = () => {
   const raw = getConfig('COLUMNS_TO_KEEP');
-  return raw.split(',').map((s) => s.trim()).filter((s) => s);
+  return raw.split('|').map((s) => s.trim()).filter((s) => s);
 };
 
 /**

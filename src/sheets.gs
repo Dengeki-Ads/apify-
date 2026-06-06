@@ -2,12 +2,6 @@
  * sheets.gs — Google Sheets操作ユーティリティ
  */
 
-const LOG_HEADERS = [
-  'triggered_at', 'completed_at', 'run_id', 'target_period', 'target_month',
-  'status', 'result_count', 'raw_file_id', 'raw_file_url',
-  'consolidated_status', 'error_detail'
-];
-
 /**
  * 名前でシートを取得する。存在しない場合は自動作成。
  */
@@ -21,57 +15,8 @@ const getSheet = (sheetName) => {
   return sheet;
 };
 
-/**
- * dataシートをクリアしてデータを上書きする。
- */
-const overwriteDataSheet = (headers, rows) => {
-  if (!rows || rows.length === 0) return;
-
-  const sheet = getSheet('data');
-  if (sheet.getLastRow() > 0) {
-    sheet.clear();
-  }
-
-  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-  sheet.getRange(2, 1, rows.length, rows[0].length).setValues(rows);
-};
-
-/**
- * 月別シート（YYYY-MM形式）にデータを上書きする。
- */
-const overwriteMonthlySheet = (sheetName, headers, rows) => {
-  if (!rows || rows.length === 0) return;
-
-  const sheet = getSheet(sheetName);
-  if (sheet.getLastRow() > 0) {
-    sheet.clear();
-  }
-
-  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-  sheet.getRange(2, 1, rows.length, rows[0].length).setValues(rows);
-  Logger.log(`[MONTHLY] ${sheetName}: ${rows.length} rows written.`);
-};
-
-/**
- * シート名がYYYY-MM形式の月別シートかどうか判定する。
- */
-const isMonthlySheetName = (name) => {
-  return /^\d{4}-\d{2}$/.test(name);
-};
-
-/**
- * 全月別シートの名前リストを取得する（ソート済み）。
- */
-const listMonthlySheets = () => {
-  const ss = getSpreadsheet();
-  return ss.getSheets()
-    .map((s) => s.getName())
-    .filter(isMonthlySheetName)
-    .sort();
-};
-
 /** 統合対象から除外するシート名 */
-const EXCLUDED_SHEETS = new Set(['log', 'settings']);
+const EXCLUDED_SHEETS = new Set(['settings', 'log', 'notified']);
 
 /**
  * 統合対象の全シート名を取得する（統合シート自身と除外リストを除く）。
@@ -83,14 +28,6 @@ const listSourceSheets = () => {
     .map((s) => s.getName())
     .filter((name) => name !== consolidatedName && !EXCLUDED_SHEETS.has(name))
     .sort();
-};
-
-/**
- * 統合シートを更新する。
- * 全ソースシート（統合・log・settings以外）を結合して統合シートを再生成する。
- */
-const rebuildConsolidatedSheet = (updatedMonths) => {
-  return fullRebuildConsolidatedSheet();
 };
 
 /**
@@ -200,53 +137,6 @@ function rebuildConsolidatedManual() {
   const result = fullRebuildConsolidatedSheet();
   Logger.log(`[MANUAL] Consolidated rebuild result: ${result}`);
 }
-
-/**
- * Apifyタスクの期間が変わったかチェックし、変わっていたらdataシートをアーカイブする。
- */
-const checkAndArchive = () => {
-  const props = PropertiesService.getScriptProperties();
-  const currentPeriod = props.getProperty('CURRENT_PERIOD');
-  if (!currentPeriod) return;
-  const lastPeriod = props.getProperty('LAST_PERIOD');
-
-  props.setProperty('LAST_PERIOD', currentPeriod);
-
-  if (!lastPeriod || lastPeriod === currentPeriod) {
-    return;
-  }
-
-  const ss = getSpreadsheet();
-  const dataSheet = ss.getSheetByName('data');
-  if (!dataSheet || dataSheet.getLastRow() <= 1) {
-    return;
-  }
-
-  const archiveName = formatPeriodName(lastPeriod);
-
-  let finalName = archiveName;
-  let counter = 1;
-  while (ss.getSheetByName(finalName)) {
-    finalName = `${archiveName}_${counter}`;
-    counter++;
-  }
-
-  dataSheet.setName(finalName);
-  Logger.log(`[ARCHIVE] data sheet archived as "${finalName}"`);
-};
-
-/**
- * 期間文字列 "YYYY-MM-DD_YYYY-MM-DD" を "M/D-M/D" 形式に変換する。
- */
-const formatPeriodName = (periodStr) => {
-  const [sinceStr, untilStr] = periodStr.split('_');
-  const formatDate = (dateStr) => {
-    if (!dateStr) return '?';
-    const d = new Date(dateStr);
-    return `${d.getMonth() + 1}/${d.getDate()}`;
-  };
-  return `${formatDate(untilStr)}-${formatDate(sinceStr)}`;
-};
 
 /**
  * rawデータを別スプレッドシートとしてGoogle Driveに保存する。
@@ -391,77 +281,3 @@ function testRawSaveSteps() {
   }
 }
 
-/**
- * logシートに1行追記する。
- */
-const appendLogRow = (logData) => {
-  const sheet = getSheet('log');
-  const row = [
-    logData.triggered_at || '',
-    logData.completed_at || '',
-    logData.run_id || '',
-    logData.target_period || '',
-    logData.target_month || '',
-    logData.status || '',
-    logData.result_count || '',
-    logData.raw_file_id || '',
-    logData.raw_file_url || '',
-    logData.consolidated_status || '',
-    logData.error_detail || '',
-  ];
-  sheet.appendRow(row);
-};
-
-/**
- * logシートのrunId一致行を更新する（下から検索）。
- */
-const updateLogRow = (runId, updates) => {
-  const sheet = getSheet('log');
-  const lastRow = sheet.getLastRow();
-  if (lastRow <= 1) return;
-
-  const runIds = sheet.getRange(2, 3, lastRow - 1, 1).getValues();
-
-  let targetRow = -1;
-  for (let i = runIds.length - 1; i >= 0; i--) {
-    if (runIds[i][0] === runId) {
-      targetRow = i + 2;
-      break;
-    }
-  }
-
-  if (targetRow === -1) {
-    Logger.log(`Warning: RunID "${runId}" not found in log sheet.`);
-    return;
-  }
-
-  const columnMap = {
-    completed_at: 2,
-    target_period: 4,
-    target_month: 5,
-    status: 6,
-    result_count: 7,
-    raw_file_id: 8,
-    raw_file_url: 9,
-    consolidated_status: 10,
-    error_detail: 11,
-  };
-  for (const [key, col] of Object.entries(columnMap)) {
-    if (updates[key] !== undefined) {
-      sheet.getRange(targetRow, col).setValue(updates[key]);
-    }
-  }
-};
-
-/**
- * logシートにヘッダー行を書き込む（初回セットアップ用）。
- */
-const initializeLogHeaders = () => {
-  const sheet = getSheet('log');
-  if (sheet.getLastRow() === 0) {
-    sheet.getRange(1, 1, 1, LOG_HEADERS.length).setValues([LOG_HEADERS]);
-    Logger.log('Log headers initialized.');
-  } else {
-    Logger.log('Log sheet already has data. Skipping header initialization.');
-  }
-};
