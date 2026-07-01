@@ -16,6 +16,9 @@
 // 統合シート構築用に「文字列」で全ソースシートを保持する。
 let SHEET_CACHE = null;
 
+// 手動再処理(reprocessRawById)中は Slack 通知を抑止するためのフラグ。
+let SKIP_NOTIFY_ONCE = false;
+
 const PENDING_JOBS_KEY = 'PENDING_SHEET_JOBS';
 const PROCESS_FN_NAME = 'processSheetData';
 const PROCESS_DEFER_MS = 60 * 1000; // 1分後
@@ -350,6 +353,11 @@ const daysSinceUpload = (uploadDateStr) => {
  * 条件: views >= viewsMin && sponsored_by NOT IN exclude && (今日 - upload_date) <= maxDays && 未通知
  */
 const checkAndNotifyRows = (headers, rows) => {
+  // 手動再処理中は通知を飛ばさない（過去データの再取り込みで誤通知しないため）。
+  if (SKIP_NOTIFY_ONCE) {
+    Logger.log('[NOTIFY SKIP] SKIP_NOTIFY_ONCE is set (manual reprocess).');
+    return 0;
+  }
   const cfg = getNotifyConfig();
   const keyCol = headers.indexOf(NOTIFY_KEY_COLUMN);
   const viewsCol = headers.indexOf('views');
@@ -741,4 +749,31 @@ function clearAllProcessTriggers() {
     .filter((t) => t.getHandlerFunction() === PROCESS_FN_NAME);
   triggers.forEach((t) => ScriptApp.deleteTrigger(t));
   Logger.log(`[MANUAL] Deleted ${triggers.length} processSheetData trigger(s).`);
+}
+
+/**
+ * 手動復旧: 既存のraw原本(fileId)を現行コードで再処理する。
+ * 再スクレイプ不要・Slack通知はスキップ。GASエディタから引数付きで手動実行する。
+ * 例) reprocessRawById('1gWX5XwW35ZXSjysREc2zTx7p1mTFdK2dtHeJT92Xdo8')  // 6月
+ */
+function reprocessRawById(fileId) {
+  if (!fileId) {
+    Logger.log('[REPROCESS] fileId is required. 例: reprocessRawById("1gWX5...")');
+    return;
+  }
+  SKIP_NOTIFY_ONCE = true;
+  try {
+    enqueueJob({
+      type: 'process_data',
+      runId: 'manual-reprocess',
+      rawFileId: fileId,
+      rawFileUrl: '',
+      resultCount: 0,
+    });
+    Logger.log(`[REPROCESS] Enqueued raw ${fileId}. Running processSheetData now...`);
+    processSheetData({});
+    Logger.log('[REPROCESS] Done.');
+  } finally {
+    SKIP_NOTIFY_ONCE = false;
+  }
 }
