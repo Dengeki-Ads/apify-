@@ -4,7 +4,9 @@
 
 /**
  * 基準日からoffsetMonth分ずらした月の期間を生成する。
- * 月初（1日）〜月末（最終日）の範囲を返す。
+ * 月初（1日）〜翌月1日の範囲を返す。ただし終了日が未来になる場合は当日を上限とする。
+ *   - 当月: 1日 〜 当日（例: 6/12実行 → 6/1〜6/12）
+ *   - 過去月: 1日 〜 翌月1日（満了。例: 6/12実行の先月 → 5/1〜6/1）
  * Apifyの仕様: since=期間終了日, until=期間開始日
  */
 const buildMonthPeriod = (baseDate, offsetMonth) => {
@@ -13,10 +15,12 @@ const buildMonthPeriod = (baseDate, offsetMonth) => {
   const month = baseDate.getMonth() + offsetMonth;
 
   const firstOfMonth = new Date(year, month, 1);
-  const lastOfMonth = new Date(year, month + 1, 0); // 月末日
+  const firstOfNextMonth = new Date(year, month + 1, 1); // 次の月の1日
+  // 終了日は「次の月の1日」。ただし未来日にはせず、当日(baseDate)を上限にする。
+  const endDate = firstOfNextMonth.getTime() > baseDate.getTime() ? baseDate : firstOfNextMonth;
 
   const until = Utilities.formatDate(firstOfMonth, tz, 'yyyy-MM-dd');
-  const since = Utilities.formatDate(lastOfMonth, tz, 'yyyy-MM-dd');
+  const since = Utilities.formatDate(endDate, tz, 'yyyy-MM-dd');
   const monthLabel = Utilities.formatDate(firstOfMonth, tz, 'yyyy-MM');
 
   return { since, until, month: monthLabel };
