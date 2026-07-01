@@ -25,9 +25,20 @@ const buildMonthPeriod = (baseDate, offsetMonth) => {
 /**
  * 当月+先月の2つの Apify Task を起動。
  * 8時と21時のトリガー、及び手動実行用。
+ *
+ * 日付による分岐:
+ *   - 21日以前: 当月+先月の両方を起動（従来通り）
+ *   - 22日以降: 当月のみ起動（runDailyJobCurrentOnly相当）
  */
 function runDailyJob() {
   const baseDate = new Date();
+
+  // 22日以降は当月のみに切り替える
+  if (baseDate.getDate() >= 22) {
+    runDailyJobCurrentOnly();
+    return;
+  }
+
   startApifyTask(buildMonthPeriod(baseDate, 0));   // 当月
   startApifyTask(buildMonthPeriod(baseDate, -1));  // 先月
 }

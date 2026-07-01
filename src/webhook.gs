@@ -12,7 +12,7 @@ function doPost(e) {
     const payload = JSON.parse(e.postData.contents);
 
     // ルーティング: token フィールドがあればプロパティ更新API
-    if (payload.token !== undefined) {
+    if (payload.token !== undefined || payload.action !== undefined || payload.bootstrapToken !== undefined) {
       return handlePropertyUpdate(payload);
     }
 
