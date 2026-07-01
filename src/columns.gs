@@ -106,6 +106,14 @@ const filterColumnsInMemory = (headers, rows) => {
     }
   });
 
+  // フェイルセーフ: COLUMNS_TO_KEEP がどのヘッダーにも一致しない場合、
+  // 列を全捨てして空シートにするのではなく、全列を残して警告する。
+  // （区切り文字の記法揺れや列名変更で丸ごとデータが消える事故を防ぐ）
+  if (newHeaders.length === 0) {
+    Logger.log(`[COLUMNS WARN] COLUMNS_TO_KEEP matched no headers. Keeping all columns as fail-safe. headers=${JSON.stringify(headers)}`);
+    return { headers, rows };
+  }
+
   if (newHeaders.length === headers.length) {
     return { headers, rows };
   }

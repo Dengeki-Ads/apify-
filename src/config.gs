@@ -73,12 +73,12 @@ function checkPeriod() {
 }
 
 /**
- * COLUMNS_TO_KEEP をパースし、常に保持する列を付与して返す。
- * リスト系プロパティは | 区切りで保存される運用。
+ * COLUMNS_TO_KEEP をパースして列名の配列を返す。
+ * 区切りは "|" と "," の両方を許容する（記法揺れで全列が捨てられる事故を防ぐ）。
  */
 const getColumnsToKeep = () => {
   const raw = getConfig('COLUMNS_TO_KEEP');
-  return raw.split('|').map((s) => s.trim()).filter((s) => s);
+  return raw.split(/[|,]/).map((s) => s.trim()).filter((s) => s);
 };
 
 /**
