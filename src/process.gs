@@ -777,3 +777,16 @@ function reprocessRawById(fileId) {
     SKIP_NOTIFY_ONCE = false;
   }
 }
+
+/**
+ * 引数なしラッパー: GASの「実行」ボタンから直接動かせる復旧関数。
+ * 実行ボタンは引数を渡せないため、fileId を埋め込んだ関数を用意する。
+ * 使い方: 上部のドロップダウンで下記の関数を選んで「実行」するだけ。
+ */
+function reprocessJune() {
+  reprocessRawById('1gWX5XwW35ZXSjysREc2zTx7p1mTFdK2dtHeJT92Xdo8');
+}
+
+function reprocessJuly() {
+  reprocessRawById('1c9v8dHMaV-DVob8dXCfFXIROn5rC0OI3MCmg520w5lA');
+}
