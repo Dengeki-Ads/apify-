@@ -31,9 +31,13 @@ const NOTIFIED_HEADERS = ['key', 'notified_at', 'views', 'sponsored_by', 'upload
 const NOTIFY_KEY_COLUMN = 'uploadedAtFormatted';
 
 const DEFAULTS = {
-  NOTIFY_VIEWS_MIN: 10000,
-  NOTIFY_VIEWS_MIN_100K: 100000,
-  NOTIFY_MAX_DAYS: 21,
+  // 当月投稿: 5万・15万の2段階で通知
+  NOTIFY_CURRENT_VIEWS_1: 50000,
+  NOTIFY_CURRENT_VIEWS_2: 150000,
+  // 先月投稿: 30万以上で通知
+  NOTIFY_PREV_VIEWS: 300000,
+  // 通知対象は投稿から2週間(14日)以内
+  NOTIFY_MAX_DAYS: 14,
   NOTIFY_SPONSOR_INCLUDE: 'ルルットリリィ|杖と剣のウィストリア|転スラ|ぷちきゅあ',
   SLACK_MESSAGE_TEXT_100K: 'CVに繋がるコメントお願いします！',
 };
@@ -45,8 +49,9 @@ const DEFAULTS = {
 const getNotifyConfig = () => {
   const props = PropertiesService.getScriptProperties();
   return {
-    viewsMin: Number(props.getProperty('NOTIFY_VIEWS_MIN') || DEFAULTS.NOTIFY_VIEWS_MIN),
-    viewsMin100K: Number(props.getProperty('NOTIFY_VIEWS_MIN_100K') || DEFAULTS.NOTIFY_VIEWS_MIN_100K),
+    currentViews1: Number(props.getProperty('NOTIFY_CURRENT_VIEWS_1') || DEFAULTS.NOTIFY_CURRENT_VIEWS_1),
+    currentViews2: Number(props.getProperty('NOTIFY_CURRENT_VIEWS_2') || DEFAULTS.NOTIFY_CURRENT_VIEWS_2),
+    prevViews: Number(props.getProperty('NOTIFY_PREV_VIEWS') || DEFAULTS.NOTIFY_PREV_VIEWS),
     maxDays: Number(props.getProperty('NOTIFY_MAX_DAYS') || DEFAULTS.NOTIFY_MAX_DAYS),
     sponsorInclude: new Set(
       (props.getProperty('NOTIFY_SPONSOR_INCLUDE') || DEFAULTS.NOTIFY_SPONSOR_INCLUDE)
@@ -125,8 +130,15 @@ const initSheetCache = () => {
   const ss = getSpreadsheet();
   SHEET_CACHE = {
     sourceSheets: {},          // 'YYYY-MM' などソースシート名 -> { headers, rows } (すべて文字列)
-    notified10k: new Set(),    // 1万通知済みのキー(uploadedAtFormatted値)
-    notified100k: new Set(),   // 10万通知済みのキー(uploadedAtFormatted値)
+    // 新tierごとの通知済みキー(uploadedAtFormatted値)
+    notifiedByTier: {
+      '5w': new Set(),   // 当月 5万通知済み
+      '15w': new Set(),  // 当月 15万通知済み
+      '30w': new Set(),  // 先月 30万通知済み
+    },
+    // 旧仕様(1万/10万 = tier '1w'/'10w'/空)で通知済みのキー。
+    // デプロイ直後に新条件で再通知(スパム)しないよう、これらは新tierでも抑止する。
+    notifiedLegacy: new Set(),
     newNotifiedRecords: [],    // 今回新たに通知したレコード(notified シートへ追記)
   };
 
@@ -145,7 +157,7 @@ const initSheetCache = () => {
 
   const tNotified = Date.now();
   loadNotifiedKeys();
-  Logger.log(`  [TIMING:init] loadNotifiedKeys (10k=${SHEET_CACHE.notified10k.size}, 100k=${SHEET_CACHE.notified100k.size}): ${((Date.now() - tNotified) / 1000).toFixed(2)}s`);
+  Logger.log(`  [TIMING:init] loadNotifiedKeys (5w=${SHEET_CACHE.notifiedByTier['5w'].size}, 15w=${SHEET_CACHE.notifiedByTier['15w'].size}, 30w=${SHEET_CACHE.notifiedByTier['30w'].size}, legacy=${SHEET_CACHE.notifiedLegacy.size}): ${((Date.now() - tNotified) / 1000).toFixed(2)}s`);
 };
 
 /**
@@ -172,11 +184,12 @@ const loadNotifiedKeys = () => {
     const key = String(row[keyCol] || '');
     if (!key) continue;
     const tier = tierCol !== -1 ? String(row[tierCol] || '') : '';
-    if (tier === '10w') {
-      SHEET_CACHE.notified100k.add(key);
+    if (SHEET_CACHE.notifiedByTier[tier]) {
+      // 新tier(5w/15w/30w)の通知済みキー
+      SHEET_CACHE.notifiedByTier[tier].add(key);
     } else {
-      // 空 or '1w' (既存データの暗黙のマイグレーション)
-      SHEET_CACHE.notified10k.add(key);
+      // 旧tier('1w'/'10w')や空 = 旧仕様で通知済み。新条件での再通知を抑止する。
+      SHEET_CACHE.notifiedLegacy.add(key);
     }
   }
 };
@@ -348,9 +361,39 @@ const daysSinceUpload = (uploadDateStr) => {
 };
 
 /**
+ * upload_date (YYYY/MM/DD) が「当月」「先月」「それ以外」のどれかを
+ * 今日(Asia/Tokyo)の暦月を基準に判定する。
+ *   'current'  : 今と同じ暦月の投稿
+ *   'previous' : 1つ前の暦月の投稿
+ *   'other'    : それ以外(パース不能含む)
+ */
+const monthCategory = (uploadDateStr) => {
+  const m = String(uploadDateStr || '').match(/^(\d{4})\/(\d{2})\/(\d{2})/);
+  if (!m) return 'other';
+  const upY = Number(m[1]);
+  const upMo = Number(m[2]);
+
+  const todayStr = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy/MM');
+  const tm = todayStr.match(/^(\d{4})\/(\d{2})/);
+  const curY = Number(tm[1]);
+  const curMo = Number(tm[2]);
+
+  if (upY === curY && upMo === curMo) return 'current';
+
+  let prevY = curY;
+  let prevMo = curMo - 1;
+  if (prevMo === 0) { prevMo = 12; prevY = curY - 1; }
+  if (upY === prevY && upMo === prevMo) return 'previous';
+
+  return 'other';
+};
+
+/**
  * 整形済みデータ(headers, rows)を1行ずつチェックし、通知条件を満たす行に対して通知を実行する。
- * 通知済みのキーは SHEET_CACHE.notifiedKeys と newNotifiedRecords に追加される。
- * 条件: views >= viewsMin && sponsored_by NOT IN exclude && (今日 - upload_date) <= maxDays && 未通知
+ * 通知済みのキーは SHEET_CACHE.notifiedByTier と newNotifiedRecords に追加される。
+ * 条件: sponsored_by IN include && (今日 - upload_date) <= maxDays(14日) && 未通知 かつ
+ *   - 先月投稿: views >= 30万 で通知(tier '30w')
+ *   - 当月投稿: views >= 5万 / 15万 の2段階で通知(tier '5w' / '15w')
  */
 const checkAndNotifyRows = (headers, rows) => {
   // 手動再処理中は通知を飛ばさない（過去データの再取り込みで誤通知しないため）。
@@ -383,7 +426,9 @@ const checkAndNotifyRows = (headers, rows) => {
     if (!key) continue;
 
     const views = Number(row[viewsCol]) || 0;
-    if (views < cfg.viewsMin) continue; // 1万にも満たないなら何もしない
+    // どの tier の最小閾値にも満たないなら早期スキップ
+    const minViews = Math.min(cfg.currentViews1, cfg.currentViews2, cfg.prevViews);
+    if (views < minViews) continue;
 
     const sponsor = String(row[sponsorCol] || '');
     // ホワイトリスト方式: sponsored_by が NOTIFY_SPONSOR_INCLUDE に含まれている時のみ通知。
@@ -397,70 +442,81 @@ const checkAndNotifyRows = (headers, rows) => {
     const videoUrl = urlCol !== -1 ? String(row[urlCol] || '') : '';
     const creator = uploadedByCol !== -1 ? String(row[uploadedByCol] || '') : '';
 
-    // ========== 10万 tier(高い方を優先) ==========
-    if (views >= cfg.viewsMin100K) {
-      if (SHEET_CACHE.notified100k.has(key)) continue;
+    // 旧仕様(1万/10万)で通知済みの投稿は、新条件でも再通知しない(デプロイ直後のスパム防止)。
+    if (SHEET_CACHE.notifiedLegacy.has(key)) continue;
 
+    const cat = monthCategory(uploadDate);
+
+    // 高い方の閾値を優先して通知テキストを組み立てる共通処理。
+    const notifyHigh = (label, tier) => {
       const text = [
         '<!channel>',
-        '10万再生突破しました！',
+        label,
         cfg.messageText100K,
         `案件名：${sponsor || '(なし)'}`,
         `制作者：${creator || '(なし)'}`,
         `投稿日：${uploadDate}`,
         `投稿URL：${videoUrl}`,
       ].join('\n');
-
       try {
         notifySlack({ text });
       } catch (e) {
-        Logger.log(`[NOTIFY FAIL] tier=10w key=${key}: ${e.message}`);
+        Logger.log(`[NOTIFY FAIL] tier=${tier} key=${key}: ${e.message}`);
+        return false;
+      }
+      SHEET_CACHE.notifiedByTier[tier].add(key);
+      SHEET_CACHE.newNotifiedRecords.push({
+        key, notified_at: nowStr, views, sponsored_by: sponsor, upload_date: uploadDate, tier,
+      });
+      return true;
+    };
+
+    // ========== 先月投稿: 30万 tier ==========
+    if (cat === 'previous') {
+      if (views < cfg.prevViews) continue;
+      if (SHEET_CACHE.notifiedByTier['30w'].has(key)) continue;
+      if (notifyHigh('30万再生突破しました！', '30w')) notifiedCount++;
+      continue;
+    }
+
+    // ========== 当月投稿: 5万 / 15万 の2段階 ==========
+    if (cat === 'current') {
+      // 15万 tier(高い方を優先)
+      if (views >= cfg.currentViews2) {
+        if (SHEET_CACHE.notifiedByTier['15w'].has(key)) continue;
+        if (notifyHigh('15万再生突破しました！', '15w')) notifiedCount++;
         continue;
       }
 
-      SHEET_CACHE.notified100k.add(key);
-      SHEET_CACHE.newNotifiedRecords.push({
-        key,
-        notified_at: nowStr,
-        views,
-        sponsored_by: sponsor,
-        upload_date: uploadDate,
-        tier: '10w',
-      });
-      notifiedCount++;
+      // 5万 tier(15万には満たない場合のみ)
+      if (views >= cfg.currentViews1) {
+        if (SHEET_CACHE.notifiedByTier['5w'].has(key)) continue;
+        try {
+          notifySlack({
+            title: '5万再生突破しました！',
+            message: '<!channel> ' + sponsor + cfg.messageText,
+            level: 'info',
+            fields: {
+              '案件': sponsor || '(なし)',
+              '制作者': creator || '(なし)',
+              '投稿日': uploadDate,
+              '動画URL': videoUrl,
+            },
+          });
+        } catch (e) {
+          Logger.log(`[NOTIFY FAIL] tier=5w key=${key}: ${e.message}`);
+          continue;
+        }
+        SHEET_CACHE.notifiedByTier['5w'].add(key);
+        SHEET_CACHE.newNotifiedRecords.push({
+          key, notified_at: nowStr, views, sponsored_by: sponsor, upload_date: uploadDate, tier: '5w',
+        });
+        notifiedCount++;
+      }
       continue;
     }
 
-    // ========== 1万 tier(10万には満たない場合のみ) ==========
-    if (SHEET_CACHE.notified10k.has(key)) continue;
-
-    try {
-      notifySlack({
-        title: '一万再生突破しました！',
-        message: '<!channel> ' + sponsor + cfg.messageText,
-        level: 'info',
-        fields: {
-          '案件': sponsor || '(なし)',
-          '制作者': creator || '(なし)',
-          '投稿日': uploadDate,
-          '動画URL': videoUrl,
-        },
-      });
-    } catch (e) {
-      Logger.log(`[NOTIFY FAIL] tier=1w key=${key}: ${e.message}`);
-      continue;
-    }
-
-    SHEET_CACHE.notified10k.add(key);
-    SHEET_CACHE.newNotifiedRecords.push({
-      key,
-      notified_at: nowStr,
-      views,
-      sponsored_by: sponsor,
-      upload_date: uploadDate,
-      tier: '1w',
-    });
-    notifiedCount++;
+    // cat === 'other'(2週間より前の暦月など)は通知対象外
   }
 
   return notifiedCount;
