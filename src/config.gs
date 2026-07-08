@@ -90,6 +90,14 @@ const getConsolidatedSheetName = () => {
 };
 
 /**
+ * 集計シート名を取得する。未設定時は「集計」。
+ */
+const getSummarySheetName = () => {
+  const name = PropertiesService.getScriptProperties().getProperty('SUMMARY_SHEET_NAME');
+  return name || '集計';
+};
+
+/**
  * スクリプトプロパティからキーを取得する。未設定時はnullを返す（エラーなし）。
  */
 const getOptionalConfig = (key) => {

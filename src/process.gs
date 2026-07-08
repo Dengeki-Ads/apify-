@@ -30,6 +30,10 @@ const NOTIFIED_SHEET_NAME = 'notified';
 const NOTIFIED_HEADERS = ['key', 'notified_at', 'views', 'sponsored_by', 'upload_date', 'tier'];
 const NOTIFY_KEY_COLUMN = 'uploadedAtFormatted';
 
+// 目標達成通知の状態を保持する ScriptProperties キー。
+// 「現在達成中」の sponsored_by 名(正規化済み)の JSON 配列を格納する。
+const ACHIEVED_STATE_KEY = 'SUMMARY_ACHIEVED_STATE';
+
 const DEFAULTS = {
   // 当月投稿: 5万・15万の2段階で通知
   NOTIFY_CURRENT_VIEWS_1: 50000,
@@ -394,8 +398,10 @@ const monthCategory = (uploadDateStr) => {
  * 条件: sponsored_by IN include && (今日 - upload_date) <= maxDays(14日) && 未通知 かつ
  *   - 先月投稿: views >= 30万 で通知(tier '30w')
  *   - 当月投稿: views >= 5万 / 15万 の2段階で通知(tier '5w' / '15w')
+ * achievedSponsors(正規化済み名の Set)に含まれる案件は、目標達成済みとして
+ * 全マイルストン通知(5万/15万/30万)を抑止する。
  */
-const checkAndNotifyRows = (headers, rows) => {
+const checkAndNotifyRows = (headers, rows, achievedSponsors) => {
   // 手動再処理中は通知を飛ばさない（過去データの再取り込みで誤通知しないため）。
   if (SKIP_NOTIFY_ONCE) {
     Logger.log('[NOTIFY SKIP] SKIP_NOTIFY_ONCE is set (manual reprocess).');
@@ -434,6 +440,9 @@ const checkAndNotifyRows = (headers, rows) => {
     // ホワイトリスト方式: sponsored_by が NOTIFY_SPONSOR_INCLUDE に含まれている時のみ通知。
     // 空 sponsor や未登録案件は通知対象外。
     if (!sponsor || !cfg.sponsorInclude.has(sponsor)) continue;
+
+    // 目標達成済みの案件はマイルストン通知(5万/15万/30万)を全段階オフにする。
+    if (achievedSponsors && achievedSponsors.has(normalizeSponsor(sponsor))) continue;
 
     const uploadDate = String(row[uploadDateCol] || '');
     const diffDays = daysSinceUpload(uploadDate);
@@ -520,6 +529,61 @@ const checkAndNotifyRows = (headers, rows) => {
   }
 
   return notifiedCount;
+};
+
+/**
+ * 目標達成の Slack 通知。達成エピソードごとに1回だけ通知する。
+ * ScriptProperties(ACHIEVED_STATE_KEY)に「現在達成中」の sponsor 集合を保持し、
+ * 前回未達→今回達成 になった sponsor のみ通知する。未達に戻れば集合から外れて再アーム
+ * されるため、翌月などに再達成したら再び通知される。
+ * summaryRows: [sponsored_by, sum_views, views_goal, achieved] の配列。
+ */
+const notifyGoalAchievements = (summaryRows) => {
+  // 手動再処理中は達成通知も飛ばさない(過去データ再取り込みでの誤通知防止)。
+  if (SKIP_NOTIFY_ONCE) {
+    Logger.log('[ACHIEVE SKIP] SKIP_NOTIFY_ONCE is set (manual reprocess).');
+    return 0;
+  }
+
+  const props = PropertiesService.getScriptProperties();
+  let prev;
+  try {
+    prev = new Set(JSON.parse(props.getProperty(ACHIEVED_STATE_KEY) || '[]'));
+  } catch (e) {
+    prev = new Set();
+  }
+
+  const achievedNow = (summaryRows || []).filter((r) => r[3] === 1);
+  const newState = [];
+  let notified = 0;
+
+  for (const r of achievedNow) {
+    const sponsor = r[0];
+    if (prev.has(sponsor)) {
+      // 既に達成通知済みで達成継続中。状態を維持(再通知しない)。
+      newState.push(sponsor);
+      continue;
+    }
+    // 未達 → 達成 に変化した案件のみ通知。
+    const text = [
+      '<!channel>',
+      ':tada: 目標達成しました！',
+      `案件名：${sponsor}`,
+      `再生数(当月)：${r[1]}`,
+      `目標：${r[2]}`,
+    ].join('\n');
+    try {
+      notifySlack({ text });
+      newState.push(sponsor); // 通知成功時のみ達成済みとして記録(失敗時は次回リトライ)
+      notified++;
+    } catch (e) {
+      Logger.log(`[ACHIEVE FAIL] sponsor=${sponsor}: ${e.message}`);
+    }
+  }
+
+  props.setProperty(ACHIEVED_STATE_KEY, JSON.stringify(newState));
+  Logger.log(`[ACHIEVE] Newly notified: ${notified}. Active achieved: ${newState.length}.`);
+  return notified;
 };
 
 // ============================================================================
@@ -650,7 +714,7 @@ const processDataJob = (job) => {
 
   if (!rawData.rows || rawData.rows.length === 0) {
     Logger.log(`[PROCESS] Raw data not readable (fileId=${job.rawFileId})`);
-    return new Set();
+    return { updatedMonths: new Set(), staged: [] };
   }
 
   const tGroup = Date.now();
@@ -667,13 +731,8 @@ const processDataJob = (job) => {
   }
   lap('applySheetTransformationsInMemory(all months)', tTrans);
 
-  // 通知条件チェック + 通知実行(月別シート書込前)
-  const tNotify = Date.now();
-  let totalNotified = 0;
-  for (const result of Object.values(stagedByMonth)) {
-    totalNotified += checkAndNotifyRows(result.headers, result.rows);
-  }
-  lap(`checkAndNotifyRows (notified=${totalNotified})`, tNotify);
+  // 通知(マイルストン)は達成判定の後にまとめて実行するため、ここでは行わない。
+  // 整形済みデータは staged として返し、processSheetData 側で通知する。
 
   // 月別シートに直接書込(typed) — キャッシュ経由ではない
   const tWrite = Date.now();
@@ -694,7 +753,11 @@ const processDataJob = (job) => {
   }
   lap(`update cache (display strings, new rows only)`, tCache);
 
-  return updatedMonths;
+  const staged = Object.values(stagedByMonth).map((result) => ({
+    headers: result.headers,
+    rows: result.rows,
+  }));
+  return { updatedMonths, staged };
 };
 
 // ============================================================================
@@ -723,6 +786,7 @@ function processSheetData(e) {
   lap(`initSheetCache (sources=${Object.keys(SHEET_CACHE.sourceSheets).length})`, tInit);
 
   let hasProcessedData = false;
+  const allStaged = []; // 全ジョブの整形済み {headers, rows}(通知は達成判定後にまとめて行う)
   for (const job of jobs) {
     if (!job) {
       Logger.log('[PROCESS WARN] Null/undefined job entry, skipping.');
@@ -731,7 +795,8 @@ function processSheetData(e) {
     const tJob = Date.now();
     try {
       if (job.type === 'process_data') {
-        processDataJob(job);
+        const res = processDataJob(job);
+        if (res && res.staged) allStaged.push(...res.staged);
         hasProcessedData = true;
         lap(`processDataJob runId=${job.runId}`, tJob);
       } else {
@@ -743,14 +808,7 @@ function processSheetData(e) {
   }
 
   if (hasProcessedData) {
-    const tNotifyFlush = Date.now();
-    try {
-      flushNewNotifiedRecords();
-      lap(`flushNewNotifiedRecords (count=${SHEET_CACHE.newNotifiedRecords.length})`, tNotifyFlush);
-    } catch (notifyErr) {
-      Logger.log(`[NOTIFIED FLUSH ERROR] ${notifyErr.message}`);
-    }
-
+    // 1) 統合シート再構築
     const tCons = Date.now();
     try {
       rebuildConsolidatedFromCache();
@@ -759,6 +817,59 @@ function processSheetData(e) {
       Logger.log(`[CONSOLIDATED ERROR] ${consErr.message}`);
     }
 
+    // 2) 当日データ反映後の集計・達成判定(最新月シート基準)
+    const tSummary = Date.now();
+    let summaryData = null;
+    try {
+      summaryData = computeSummaryData();
+      lap('computeSummaryData', tSummary);
+    } catch (summaryErr) {
+      Logger.log(`[SUMMARY ERROR] ${summaryErr.message}`);
+    }
+    const achievedSponsors = summaryData ? achievedSponsorsFromRows(summaryData.rows) : new Set();
+
+    // 3) 目標達成の Slack 通知(達成エピソードごとに1回)
+    const tAchieve = Date.now();
+    try {
+      const n = notifyGoalAchievements(summaryData ? summaryData.rows : []);
+      lap(`notifyGoalAchievements (newly=${n})`, tAchieve);
+    } catch (achieveErr) {
+      Logger.log(`[ACHIEVE ERROR] ${achieveErr.message}`);
+    }
+
+    // 4) マイルストン通知(達成済み案件は 5万/15万/30万 を全段階抑止)
+    const tNotify = Date.now();
+    let totalNotified = 0;
+    for (const staged of allStaged) {
+      try {
+        totalNotified += checkAndNotifyRows(staged.headers, staged.rows, achievedSponsors);
+      } catch (notifyErr) {
+        Logger.log(`[NOTIFY ERROR] ${notifyErr.message}`);
+      }
+    }
+    lap(`checkAndNotifyRows (notified=${totalNotified})`, tNotify);
+
+    // 5) 通知レコードを notified シートへ flush
+    const tNotifyFlush = Date.now();
+    try {
+      flushNewNotifiedRecords();
+      lap(`flushNewNotifiedRecords (count=${SHEET_CACHE.newNotifiedRecords.length})`, tNotifyFlush);
+    } catch (flushErr) {
+      Logger.log(`[NOTIFIED FLUSH ERROR] ${flushErr.message}`);
+    }
+
+    // 6) 集計シート書き込み
+    const tSummaryWrite = Date.now();
+    try {
+      if (summaryData) {
+        writeSummaryRows(getSummarySheetName(), SUMMARY_HEADERS, summaryData.rows);
+        lap(`writeSummaryRows (rows=${summaryData.rows.length})`, tSummaryWrite);
+      }
+    } catch (summaryWriteErr) {
+      Logger.log(`[SUMMARY WRITE ERROR] ${summaryWriteErr.message}`);
+    }
+
+    // 7) Looker Studio 同期
     const tSync = Date.now();
     try {
       syncToLookerStudio();

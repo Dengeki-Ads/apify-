@@ -24,9 +24,10 @@ const EXCLUDED_SHEETS = new Set(['settings', 'log', 'notified']);
 const listSourceSheets = () => {
   const ss = getSpreadsheet();
   const consolidatedName = getConsolidatedSheetName();
+  const summaryName = getSummarySheetName();
   return ss.getSheets()
     .map((s) => s.getName())
-    .filter((name) => name !== consolidatedName && !EXCLUDED_SHEETS.has(name))
+    .filter((name) => name !== consolidatedName && name !== summaryName && !EXCLUDED_SHEETS.has(name))
     .sort();
 };
 

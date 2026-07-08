@@ -11,8 +11,8 @@ function doPost(e) {
   try {
     const payload = JSON.parse(e.postData.contents);
 
-    // ルーティング: token フィールドがあればプロパティ更新API
-    if (payload.token !== undefined || payload.action !== undefined || payload.bootstrapToken !== undefined) {
+    // ルーティング: token フィールドがあればプロパティ更新API(トークン方式・OAuth不使用)
+    if (payload.token !== undefined) {
       return handlePropertyUpdate(payload);
     }
 
